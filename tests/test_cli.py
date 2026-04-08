@@ -570,3 +570,112 @@ class TestEndToEnd:
         assert result.exit_code == 0
         status = json.loads(result.output)
         assert status["stage"] == "plan"
+
+
+# ---------------------------------------------------------------------------
+# space create
+# ---------------------------------------------------------------------------
+
+
+class TestSpaceCreate:
+    def test_creates_space(self, runner, base_dir):
+        result = invoke(runner, ["space", "create", "personal", "--description", "My stuff"], base_dir)
+        assert result.exit_code == 0
+        assert "personal" in result.output
+
+    def test_rejects_invalid_name(self, runner, base_dir):
+        result = invoke(runner, ["space", "create", "Invalid"], base_dir)
+        assert result.exit_code == 1
+
+    def test_rejects_duplicate(self, runner, base_dir):
+        invoke(runner, ["space", "create", "personal"], base_dir)
+        result = invoke(runner, ["space", "create", "personal"], base_dir)
+        assert result.exit_code == 1
+
+
+# ---------------------------------------------------------------------------
+# space list
+# ---------------------------------------------------------------------------
+
+
+class TestSpaceList:
+    def test_lists_spaces(self, runner, base_dir):
+        invoke(runner, ["space", "create", "alpha"], base_dir)
+        invoke(runner, ["space", "create", "beta"], base_dir)
+        result = invoke(runner, ["space", "list"], base_dir)
+        assert result.exit_code == 0
+        assert "alpha" in result.output
+        assert "beta" in result.output
+
+    def test_json_output(self, runner, base_dir):
+        invoke(runner, ["space", "create", "test-space"], base_dir)
+        result = invoke(runner, ["space", "list", "--format", "json"], base_dir)
+        data = json.loads(result.output)
+        assert any(s["name"] == "test-space" for s in data)
+
+
+# ---------------------------------------------------------------------------
+# space remove
+# ---------------------------------------------------------------------------
+
+
+class TestSpaceRemove:
+    def test_removes_empty_space(self, runner, base_dir):
+        invoke(runner, ["space", "create", "temp"], base_dir)
+        result = invoke(runner, ["space", "remove", "temp"], base_dir)
+        assert result.exit_code == 0
+
+    def test_refuses_nonempty(self, runner, base_dir):
+        invoke(runner, ["space", "create", "busy"], base_dir)
+        invoke(runner, ["--space", "busy", "task", "start", "My Task", "--prompt", "test"], base_dir)
+        result = invoke(runner, ["space", "remove", "busy"], base_dir)
+        assert result.exit_code == 1
+
+    def test_force_removes_nonempty(self, runner, base_dir):
+        invoke(runner, ["space", "create", "busy"], base_dir)
+        invoke(runner, ["--space", "busy", "task", "start", "My Task", "--prompt", "test"], base_dir)
+        result = invoke(runner, ["space", "remove", "busy", "--force"], base_dir)
+        assert result.exit_code == 0
+
+
+# ---------------------------------------------------------------------------
+# space info
+# ---------------------------------------------------------------------------
+
+
+class TestSpaceInfo:
+    def test_info(self, runner, base_dir):
+        invoke(runner, ["space", "create", "personal", "--description", "My stuff"], base_dir)
+        result = invoke(runner, ["space", "info", "personal"], base_dir)
+        assert result.exit_code == 0
+        assert "personal" in result.output
+        assert "My stuff" in result.output
+
+    def test_nonexistent(self, runner, base_dir):
+        result = invoke(runner, ["space", "info", "ghost"], base_dir)
+        assert result.exit_code == 1
+
+
+# ---------------------------------------------------------------------------
+# task list --all-spaces
+# ---------------------------------------------------------------------------
+
+
+class TestTaskListAllSpaces:
+    def test_lists_across_spaces(self, runner, base_dir):
+        invoke(runner, ["space", "create", "alpha"], base_dir)
+        invoke(runner, ["space", "create", "beta"], base_dir)
+        invoke(runner, ["--space", "alpha", "task", "start", "Alpha Task", "--prompt", "test"], base_dir)
+        invoke(runner, ["--space", "beta", "task", "start", "Beta Task", "--prompt", "test"], base_dir)
+        result = invoke(runner, ["task", "list", "--all-spaces"], base_dir)
+        assert result.exit_code == 0
+        assert "alpha" in result.output.lower()
+        assert "beta" in result.output.lower()
+
+    def test_json_includes_space(self, runner, base_dir):
+        invoke(runner, ["space", "create", "alpha"], base_dir)
+        invoke(runner, ["--space", "alpha", "task", "start", "Alpha Task", "--prompt", "test"], base_dir)
+        result = invoke(runner, ["task", "list", "--all-spaces", "--format", "json"], base_dir)
+        data = json.loads(result.output)
+        assert len(data) >= 1
+        assert data[0]["space"] == "alpha"
