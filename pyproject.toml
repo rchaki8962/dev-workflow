@@ -11,6 +11,11 @@ dependencies = [
     "click>=8.0",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+]
+
 [project.scripts]
 dev-workflow = "dev_workflow.cli:main"
 
