@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 
@@ -24,6 +24,13 @@ class ReviewVerdict(str, Enum):
     APPROVE = "approve"
     REVISE = "revise"
     BLOCKED = "blocked"
+
+
+@dataclass
+class Space:
+    name: str           # lowercase, alphanumeric + hyphens
+    description: str    # short human-readable label
+    created: datetime
 
 
 @dataclass
@@ -50,6 +57,7 @@ class Task:
     task_folder: Path
     created: datetime
     updated: datetime
+    space: str = ""
 
 
 @dataclass

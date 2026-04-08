@@ -17,3 +17,9 @@ class PrerequisiteError(DevWorkflowError):
 class PlanParseError(DevWorkflowError):
     def __init__(self, message: str):
         super().__init__(f"Failed to parse plan: {message}")
+
+
+class SpaceNotFoundError(DevWorkflowError):
+    def __init__(self, name: str):
+        self.name = name
+        super().__init__(f"Space '{name}' not found. Run `space list` to see available spaces.")

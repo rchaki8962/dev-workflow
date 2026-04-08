@@ -1,6 +1,6 @@
 """Tests for dev_workflow domain models and exceptions."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -9,6 +9,7 @@ from dev_workflow.exceptions import (
     DevWorkflowError,
     PlanParseError,
     PrerequisiteError,
+    SpaceNotFoundError,
     TaskNotFoundError,
 )
 from dev_workflow.models import (
@@ -17,6 +18,7 @@ from dev_workflow.models import (
     PlanTask,
     Review,
     ReviewVerdict,
+    Space,
     Spec,
     Stage,
     Subtask,
@@ -147,6 +149,41 @@ class TestTask:
         assert task.task_folder == Path("/tasks/001")
         assert task.created == NOW
         assert task.updated == NOW
+
+
+class TestSpaceDataclass:
+    def test_construction(self):
+        now = datetime.now(timezone.utc)
+        space = Space(name="personal", description="Personal projects", created=now)
+        assert space.name == "personal"
+        assert space.description == "Personal projects"
+        assert space.created == now
+
+    def test_empty_description(self):
+        now = datetime.now(timezone.utc)
+        space = Space(name="work", description="", created=now)
+        assert space.description == ""
+
+
+class TestTaskSpaceField:
+    def test_default_space_is_empty_string(self):
+        now = datetime.now(timezone.utc)
+        task = Task(
+            task_id="2026-04-08-test", slug="test", title="Test",
+            summary="", stage=Stage.SPEC, workspaces=[Path(".")],
+            task_folder=Path("/tmp/test"), created=now, updated=now,
+        )
+        assert task.space == ""
+
+    def test_space_set_at_construction(self):
+        now = datetime.now(timezone.utc)
+        task = Task(
+            task_id="2026-04-08-test", slug="test", title="Test",
+            summary="", stage=Stage.SPEC, workspaces=[Path(".")],
+            task_folder=Path("/tmp/test"), created=now, updated=now,
+            space="harness",
+        )
+        assert task.space == "harness"
 
 
 class TestSubtaskEntry:
@@ -422,3 +459,13 @@ class TestPlanParseError:
 
     def test_is_dev_workflow_error(self):
         assert issubclass(PlanParseError, DevWorkflowError)
+
+
+class TestSpaceNotFoundError:
+    def test_message(self):
+        err = SpaceNotFoundError("personal")
+        assert "personal" in str(err)
+        assert err.name == "personal"
+
+    def test_is_dev_workflow_error(self):
+        assert issubclass(SpaceNotFoundError, DevWorkflowError)
