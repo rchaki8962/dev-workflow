@@ -179,7 +179,7 @@ class TestTaskCreationFlow:
 
     def test_state_json_created(self, runner, base, tmp_path):
         _create_task(runner, base, "My Feature", "my-feature")
-        state_dir = tmp_path / "state"
+        state_dir = tmp_path / "harness" / "state"
         state_files = list(state_dir.glob("*.json"))
         assert len(state_files) == 1
         state_data = json.loads(state_files[0].read_text())

@@ -41,9 +41,25 @@ def _create_task_via_manager(base_dir: str, title: str = "Test task", slug: str 
     """Create a task through the manager (not CLI) for setup purposes."""
     base = Path(base_dir)
     config = Config(base_dir=base)
-    store = FileTaskStore(base)
+    config._active_space = "harness"
+    # Create the space directory structure
+    (base / "harness" / "state").mkdir(parents=True, exist_ok=True)
+    (base / "harness" / "tasks").mkdir(parents=True, exist_ok=True)
+    store = FileTaskStore(config.space_dir)
     manager = TaskManager(store, config)
     return manager.create_task(title=title, workspaces=[base], slug_override=slug, prompt=prompt)
+
+
+def _get_store_and_config(base_dir: str) -> tuple[FileTaskStore, Config]:
+    """Helper to get store and config for a base directory with space setup."""
+    base = Path(base_dir)
+    config = Config(base_dir=base)
+    config._active_space = "harness"
+    # Create the space directory structure if it doesn't exist
+    (base / "harness" / "state").mkdir(parents=True, exist_ok=True)
+    (base / "harness" / "tasks").mkdir(parents=True, exist_ok=True)
+    store = FileTaskStore(config.space_dir)
+    return store, config
 
 
 # ---------------------------------------------------------------------------
@@ -340,9 +356,7 @@ class TestStageTeardown:
         invoke(runner, ["stage", "setup", "spec", "--task", "my-task"], base_dir)
 
         # Create a spec draft so teardown has something to process
-        base = Path(base_dir)
-        config = Config(base_dir=base)
-        store = FileTaskStore(base)
+        store, config = _get_store_and_config(base_dir)
         task = store.load_task("my-task")
         spec_dir = config.tasks_dir / task.task_id / "10-spec"
         (spec_dir / "spec-v1.md").write_text("# Spec: My task\n\n## Overview\nSomething.\n")
@@ -395,9 +409,7 @@ class TestReviewSetup:
         _create_task_via_manager(base_dir, "My task", slug="my-task", prompt="Build something")
 
         # Create a spec draft
-        base = Path(base_dir)
-        config = Config(base_dir=base)
-        store = FileTaskStore(base)
+        store, config = _get_store_and_config(base_dir)
         task = store.load_task("my-task")
         spec_dir = config.tasks_dir / task.task_id / "10-spec"
         (spec_dir / "spec-v1.md").write_text("# Spec: My task\n\n## Overview\nSomething.\n")
@@ -433,9 +445,7 @@ class TestReviewApprove:
         _create_task_via_manager(base_dir, "My task", slug="my-task", prompt="Build something")
 
         # Create a spec draft
-        base = Path(base_dir)
-        config = Config(base_dir=base)
-        store = FileTaskStore(base)
+        store, config = _get_store_and_config(base_dir)
         task = store.load_task("my-task")
         spec_dir = config.tasks_dir / task.task_id / "10-spec"
         (spec_dir / "spec-v1.md").write_text("# Spec: My task\n\n## Overview\nSomething.\n")
@@ -452,9 +462,7 @@ class TestReviewApprove:
         """Approve plan to advance to execution stage."""
         _create_task_via_manager(base_dir, "My task", slug="my-task", prompt="Build something")
 
-        base = Path(base_dir)
-        config = Config(base_dir=base)
-        store = FileTaskStore(base)
+        store, config = _get_store_and_config(base_dir)
         task = store.load_task("my-task")
         task_dir = config.tasks_dir / task.task_id
 

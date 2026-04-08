@@ -61,7 +61,11 @@ Build the main processing pipeline.
 @pytest.fixture
 def env(tmp_path):
     config = Config(base_dir=tmp_path)
-    store = FileTaskStore(tmp_path)
+    config._active_space = "harness"
+    # Create the space directory structure
+    (tmp_path / "harness" / "state").mkdir(parents=True)
+    (tmp_path / "harness" / "tasks").mkdir(parents=True)
+    store = FileTaskStore(config.space_dir)
     task_mgr = TaskManager(store, config)
     stage_mgr = StageManager(store, config)
     # Create a task with a non-empty prompt

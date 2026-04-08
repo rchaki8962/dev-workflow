@@ -114,7 +114,7 @@ def start(
 ) -> None:
     """Create a new task."""
     config = ctx.obj["config"]
-    store = FileTaskStore(config.base_dir)
+    store = FileTaskStore(config.space_dir)
     manager = TaskManager(store, config)
 
     workspaces = [Path(w) for w in workspace] if workspace else None
@@ -151,7 +151,7 @@ def start(
 def list_tasks(ctx: click.Context, stage: str | None, output_format: str) -> None:
     """List all tasks."""
     config = ctx.obj["config"]
-    store = FileTaskStore(config.base_dir)
+    store = FileTaskStore(config.space_dir)
     manager = TaskManager(store, config)
 
     stage_filter = Stage(stage) if stage else None
@@ -181,7 +181,7 @@ def list_tasks(ctx: click.Context, stage: str | None, output_format: str) -> Non
 def search(ctx: click.Context, query: str, output_format: str) -> None:
     """Search tasks by query."""
     config = ctx.obj["config"]
-    store = FileTaskStore(config.base_dir)
+    store = FileTaskStore(config.space_dir)
     manager = TaskManager(store, config)
 
     try:
@@ -202,7 +202,7 @@ def search(ctx: click.Context, query: str, output_format: str) -> None:
 def switch(ctx: click.Context, slug: str) -> None:
     """Switch to a task (load context)."""
     config = ctx.obj["config"]
-    store = FileTaskStore(config.base_dir)
+    store = FileTaskStore(config.space_dir)
     manager = TaskManager(store, config)
 
     try:
@@ -227,7 +227,7 @@ def switch(ctx: click.Context, slug: str) -> None:
 def info(ctx: click.Context, slug: str, output_format: str) -> None:
     """Show info for a task."""
     config = ctx.obj["config"]
-    store = FileTaskStore(config.base_dir)
+    store = FileTaskStore(config.space_dir)
     manager = TaskManager(store, config)
 
     try:
@@ -268,7 +268,7 @@ def stage_setup(
 ) -> None:
     """Set up a stage for a task."""
     config = ctx.obj["config"]
-    store = FileTaskStore(config.base_dir)
+    store = FileTaskStore(config.space_dir)
     manager = StageManager(store, config)
 
     try:
@@ -292,7 +292,7 @@ def stage_setup(
 def stage_teardown(ctx: click.Context, stage_name: str, task_slug: str) -> None:
     """Tear down a stage for a task."""
     config = ctx.obj["config"]
-    store = FileTaskStore(config.base_dir)
+    store = FileTaskStore(config.space_dir)
     manager = StageManager(store, config)
 
     try:
@@ -317,7 +317,7 @@ def stage_teardown(ctx: click.Context, stage_name: str, task_slug: str) -> None:
 def stage_status(ctx: click.Context, task_slug: str, output_format: str) -> None:
     """Show stage status for a task."""
     config = ctx.obj["config"]
-    store = FileTaskStore(config.base_dir)
+    store = FileTaskStore(config.space_dir)
     tm = TaskManager(store, config)
 
     try:
@@ -358,7 +358,7 @@ def review_setup(
 ) -> None:
     """Set up a review for a stage."""
     config = ctx.obj["config"]
-    store = FileTaskStore(config.base_dir)
+    store = FileTaskStore(config.space_dir)
     manager = StageManager(store, config)
 
     try:
@@ -382,7 +382,7 @@ def review_setup(
 def review_approve(ctx: click.Context, stage_name: str, task_slug: str) -> None:
     """Approve a review for a stage."""
     config = ctx.obj["config"]
-    store = FileTaskStore(config.base_dir)
+    store = FileTaskStore(config.space_dir)
     manager = StageManager(store, config)
 
     try:
