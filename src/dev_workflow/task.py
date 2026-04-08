@@ -72,6 +72,7 @@ class TaskManager:
             task_folder=task_folder,
             created=now,
             updated=now,
+            space=self.config._active_space,
         )
 
         # Create folder structure

@@ -21,7 +21,11 @@ from dev_workflow.task import TaskManager
 @pytest.fixture
 def setup(tmp_path):
     config = Config(base_dir=tmp_path)
-    store = FileTaskStore(tmp_path)
+    config._active_space = "harness"
+    # Create the space directory structure so FileTaskStore works
+    (tmp_path / "harness" / "state").mkdir(parents=True)
+    (tmp_path / "harness" / "tasks").mkdir(parents=True)
+    store = FileTaskStore(config.space_dir)
     manager = TaskManager(store, config)
     return manager, config, store
 
@@ -339,3 +343,21 @@ class TestSwitchTask:
 
         with pytest.raises(TaskNotFoundError):
             manager.switch_task("nonexistent-slug")
+
+
+# ---------------------------------------------------------------------------
+# space field
+# ---------------------------------------------------------------------------
+
+
+class TestCreateTaskSpace:
+    def test_space_set_from_config(self, setup, tmp_path):
+        manager, config, store = setup
+        task = manager.create_task("Build CSV export", workspaces=[tmp_path])
+        assert task.space == "harness"
+
+    def test_space_persisted_in_state(self, setup, tmp_path):
+        manager, config, store = setup
+        task = manager.create_task("Build CSV export", workspaces=[tmp_path])
+        loaded = store.load_task(task.slug)
+        assert loaded.space == "harness"
