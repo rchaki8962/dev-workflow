@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dev-workflow"
+version = "0.1.0"
+description = "Durable multi-session task management CLI for coding agents"
+requires-python = ">=3.11"
+dependencies = [
+    "click>=8.0",
+]
+
+[project.scripts]
+dev-workflow = "dev_workflow.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
