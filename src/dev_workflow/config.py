@@ -18,19 +18,33 @@ DEFAULT_STRIP_WORDS = [
 class Config:
     base_dir: Path
     strip_words: list[str] = field(default_factory=lambda: list(DEFAULT_STRIP_WORDS))
+    default_space: str = "harness"
+
+    def __post_init__(self):
+        if not hasattr(self, "_active_space"):
+            self._active_space = self.default_space
+
+    @property
+    def space_dir(self) -> Path:
+        return self.base_dir / self._active_space
 
     @property
     def state_dir(self) -> Path:
-        return self.base_dir / "state"
+        return self.space_dir / "state"
 
     @property
     def tasks_dir(self) -> Path:
-        return self.base_dir / "tasks"
+        return self.space_dir / "tasks"
+
+    @property
+    def spaces_file(self) -> Path:
+        return self.base_dir / "spaces.json"
 
 
 def load_config(
     base_dir_override: str | None = None,
     config_path: str | None = None,
+    space_override: str | None = None,
 ) -> Config:
     """
     Load config with resolution order:
@@ -41,6 +55,7 @@ def load_config(
     """
     base_dir: str | None = None
     strip_words: list[str] | None = None
+    default_space: str | None = None
 
     # Try config file first (lowest priority for base_dir, but has strip_words)
     if config_path:
@@ -50,6 +65,7 @@ def load_config(
                 data = tomllib.load(f)
             base_dir = data.get("paths", {}).get("base_dir")
             strip_words = data.get("slug", {}).get("strip_words")
+            default_space = data.get("spaces", {}).get("default")
 
     # Env var overrides config file
     env_dir = os.environ.get("DEV_WORKFLOW_DIR")
@@ -66,7 +82,19 @@ def load_config(
 
     resolved_base = Path(base_dir).expanduser().resolve()
 
-    return Config(
+    cfg = Config(
         base_dir=resolved_base,
         strip_words=strip_words if strip_words is not None else list(DEFAULT_STRIP_WORDS),
+        default_space=default_space if default_space is not None else "harness",
     )
+
+    # Resolve active space: CLI > env > config default
+    env_space = os.environ.get("DEV_WORKFLOW_SPACE")
+    if space_override:
+        cfg._active_space = space_override
+    elif env_space:
+        cfg._active_space = env_space
+    else:
+        cfg._active_space = cfg.default_space
+
+    return cfg

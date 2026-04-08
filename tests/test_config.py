@@ -20,11 +20,13 @@ from dev_workflow.config import (
 class TestConfigDataclass:
     def test_state_dir_property(self):
         cfg = Config(base_dir=Path("/data"))
-        assert cfg.state_dir == Path("/data/state")
+        cfg._active_space = "harness"
+        assert cfg.state_dir == Path("/data/harness/state")
 
     def test_tasks_dir_property(self):
         cfg = Config(base_dir=Path("/data"))
-        assert cfg.tasks_dir == Path("/data/tasks")
+        cfg._active_space = "harness"
+        assert cfg.tasks_dir == Path("/data/harness/tasks")
 
     def test_default_strip_words(self):
         cfg = Config(base_dir=Path("/data"))
@@ -120,3 +122,66 @@ class TestLoadConfigFile:
         cfg = load_config(config_path=str(config_file))
         assert cfg.strip_words == ["custom", "words"]
         assert cfg.strip_words != DEFAULT_STRIP_WORDS
+
+
+# ---------------------------------------------------------------------------
+# Space support tests
+# ---------------------------------------------------------------------------
+
+
+class TestConfigSpaceProperties:
+    def test_space_dir(self, tmp_path):
+        cfg = Config(base_dir=tmp_path, default_space="harness")
+        cfg._active_space = "harness"
+        assert cfg.space_dir == tmp_path / "harness"
+
+    def test_state_dir_routes_through_space(self, tmp_path):
+        cfg = Config(base_dir=tmp_path, default_space="harness")
+        cfg._active_space = "personal"
+        assert cfg.state_dir == tmp_path / "personal" / "state"
+
+    def test_tasks_dir_routes_through_space(self, tmp_path):
+        cfg = Config(base_dir=tmp_path, default_space="harness")
+        cfg._active_space = "personal"
+        assert cfg.tasks_dir == tmp_path / "personal" / "tasks"
+
+    def test_spaces_file(self, tmp_path):
+        cfg = Config(base_dir=tmp_path)
+        assert cfg.spaces_file == tmp_path / "spaces.json"
+
+    def test_default_space_is_harness(self):
+        cfg = Config(base_dir=Path("/data"))
+        assert cfg.default_space == "harness"
+
+
+class TestLoadConfigSpace:
+    def test_space_override(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("DEV_WORKFLOW_DIR", raising=False)
+        monkeypatch.delenv("DEV_WORKFLOW_SPACE", raising=False)
+        cfg = load_config(base_dir_override=str(tmp_path), space_override="personal")
+        assert cfg._active_space == "personal"
+
+    def test_space_env_var(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("DEV_WORKFLOW_DIR", raising=False)
+        monkeypatch.setenv("DEV_WORKFLOW_SPACE", "work")
+        cfg = load_config(base_dir_override=str(tmp_path))
+        assert cfg._active_space == "work"
+
+    def test_space_override_beats_env_var(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("DEV_WORKFLOW_SPACE", "env-space")
+        cfg = load_config(base_dir_override=str(tmp_path), space_override="cli-space")
+        assert cfg._active_space == "cli-space"
+
+    def test_default_space_from_config_file(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("DEV_WORKFLOW_DIR", raising=False)
+        monkeypatch.delenv("DEV_WORKFLOW_SPACE", raising=False)
+        config_file = tmp_path / "config.toml"
+        config_file.write_text('[spaces]\ndefault = "mydefault"\n')
+        cfg = load_config(base_dir_override=str(tmp_path), config_path=str(config_file))
+        assert cfg._active_space == "mydefault"
+
+    def test_default_space_fallback(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("DEV_WORKFLOW_DIR", raising=False)
+        monkeypatch.delenv("DEV_WORKFLOW_SPACE", raising=False)
+        cfg = load_config(base_dir_override=str(tmp_path))
+        assert cfg._active_space == "harness"
