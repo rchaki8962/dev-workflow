@@ -18,6 +18,7 @@ def _make_task(
     summary: str = "",
     created: datetime | None = None,
     updated: datetime | None = None,
+    space: str = "",
 ) -> Task:
     """Helper to build a Task for tests."""
     now = datetime.now(timezone.utc)
@@ -33,6 +34,7 @@ def _make_task(
         task_folder=Path(f"~/.dev-workflow/tasks/2026-04-08-{slug}/"),
         created=created,
         updated=updated,
+        space=space,
     )
 
 
@@ -254,3 +256,30 @@ class TestProgressField:
         raw = json.loads((tmp_path / "state" / "my-task.json").read_text())
         assert raw["progress"] == "2/5 subtasks"
         assert raw["stage"] == "execution"
+
+
+class TestSpaceField:
+    def test_space_round_trip(self, tmp_path: Path):
+        mgr = StateManager(tmp_path / "state")
+        task = _make_task(slug="my-task", space="personal")
+        mgr.save(task)
+        loaded = mgr.load("my-task")
+        assert loaded.space == "personal"
+
+    def test_space_in_json(self, tmp_path: Path):
+        mgr = StateManager(tmp_path / "state")
+        mgr.save(_make_task(slug="my-task", space="harness"))
+        raw = json.loads((tmp_path / "state" / "my-task.json").read_text())
+        assert raw["space"] == "harness"
+
+    def test_missing_space_defaults_empty(self, tmp_path: Path):
+        """Backward compat: old JSON without space field loads with space=''."""
+        mgr = StateManager(tmp_path / "state")
+        mgr.save(_make_task(slug="old-task"))
+        # Manually strip space from JSON
+        path = tmp_path / "state" / "old-task.json"
+        data = json.loads(path.read_text())
+        del data["space"]
+        path.write_text(json.dumps(data))
+        loaded = mgr.load("old-task")
+        assert loaded.space == ""

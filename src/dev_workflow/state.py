@@ -140,6 +140,7 @@ def _task_to_dict(task: Task) -> dict:
         "task_folder": str(task.task_folder),
         "created": task.created.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "updated": task.updated.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "space": task.space,
     }
 
 
@@ -155,4 +156,5 @@ def _dict_to_task(data: dict) -> Task:
         task_folder=Path(data["task_folder"]),
         created=datetime.fromisoformat(data["created"].replace("Z", "+00:00")),
         updated=datetime.fromisoformat(data["updated"].replace("Z", "+00:00")),
+        space=data.get("space", ""),
     )
