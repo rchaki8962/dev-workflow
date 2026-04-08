@@ -645,3 +645,90 @@ class TestFullWorkflow:
         info = json.loads(result.output)
         assert info["stage"] == "complete"
         assert info["slug"] == "info-test"
+
+
+# ===========================================================================
+# 10. Space integration
+# ===========================================================================
+
+
+class TestSpaceIntegration:
+    """Space CRUD, task isolation, cross-space listing, and full workflows in spaces."""
+
+    def test_create_and_list_spaces(self, runner, base):
+        """Create multiple spaces and verify they appear in list."""
+        result = cli(runner, base, ["space", "create", "personal", "--description", "Mine"])
+        assert result.exit_code == 0
+        result = cli(runner, base, ["space", "create", "work", "--description", "Job"])
+        assert result.exit_code == 0
+        result = cli(runner, base, ["space", "list"])
+        assert result.exit_code == 0
+        assert "personal" in result.output
+        assert "work" in result.output
+
+    def test_task_isolation_between_spaces(self, runner, base):
+        """Tasks created in different spaces should not appear in each other's lists."""
+        cli(runner, base, ["space", "create", "alpha"])
+        cli(runner, base, ["space", "create", "beta"])
+        cli(runner, base, ["--space", "alpha", "task", "start", "My Task", "--prompt", "alpha"])
+        cli(runner, base, ["--space", "beta", "task", "start", "My Task", "--prompt", "beta"])
+
+        result_a = cli(runner, base, ["--space", "alpha", "task", "list", "--format", "json"])
+        result_b = cli(runner, base, ["--space", "beta", "task", "list", "--format", "json"])
+        tasks_a = json.loads(result_a.output)
+        tasks_b = json.loads(result_b.output)
+        assert len(tasks_a) == 1
+        assert len(tasks_b) == 1
+        assert tasks_a[0]["space"] == "alpha"
+        assert tasks_b[0]["space"] == "beta"
+
+    def test_all_spaces_listing(self, runner, base):
+        """--all-spaces flag should list tasks across all spaces."""
+        cli(runner, base, ["space", "create", "alpha"])
+        cli(runner, base, ["space", "create", "beta"])
+        cli(runner, base, ["--space", "alpha", "task", "start", "Alpha Task", "--prompt", "a"])
+        cli(runner, base, ["--space", "beta", "task", "start", "Beta Task", "--prompt", "b"])
+        result = cli(runner, base, ["task", "list", "--all-spaces", "--format", "json"])
+        data = json.loads(result.output)
+        spaces = {t["space"] for t in data}
+        assert "alpha" in spaces
+        assert "beta" in spaces
+
+    def test_default_space_auto_created(self, runner, base):
+        """Default 'harness' space should be auto-created on first task."""
+        result = cli(runner, base, ["task", "start", "First Task", "--prompt", "test"])
+        assert result.exit_code == 0
+        result = cli(runner, base, ["space", "list", "--format", "json"])
+        data = json.loads(result.output)
+        assert any(s["name"] == "harness" for s in data)
+
+    def test_space_flag_overrides_default(self, runner, base):
+        """--space flag should override default harness space."""
+        cli(runner, base, ["space", "create", "custom"])
+        result = cli(runner, base, ["--space", "custom", "task", "start", "Custom Task", "--prompt", "test", "--format", "json"])
+        data = json.loads(result.output)
+        assert data["space"] == "custom"
+
+    def test_full_workflow_in_space(self, runner, base):
+        """Full spec cycle within a non-default space."""
+        cli(runner, base, ["space", "create", "test-space"])
+        result = cli(runner, base, ["--space", "test-space", "task", "start", "Workflow Test", "--prompt", "Build something", "--format", "json"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        slug = data["slug"]
+
+        result = cli(runner, base, ["--space", "test-space", "stage", "setup", "spec", "--task", slug, "--format", "json"])
+        assert result.exit_code == 0
+        setup_data = json.loads(result.output)
+
+        spec_path = Path(setup_data["output_path"])
+        spec_path.write_text("# Spec: Test\n\n## Overview\nTest spec\n")
+
+        result = cli(runner, base, ["--space", "test-space", "stage", "teardown", "spec", "--task", slug])
+        assert result.exit_code == 0
+        result = cli(runner, base, ["--space", "test-space", "review", "approve", "spec", "--task", slug])
+        assert result.exit_code == 0
+
+        result = cli(runner, base, ["--space", "test-space", "task", "info", slug, "--format", "json"])
+        data = json.loads(result.output)
+        assert data["stage"] == "plan"
