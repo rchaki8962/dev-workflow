@@ -74,7 +74,7 @@ Both methods install the plugin at user scope -- available across all your proje
 
 ## Usage
 
-The plugin provides slash commands that orchestrate the CLI with [Superpowers](https://github.com/anthropics/claude-code-plugins) skills. This is the intended way to use dev-workflow.
+The plugin provides slash commands that orchestrate the CLI with [Superpowers](https://github.com/obra/superpowers) skills. This is the intended way to use dev-workflow.
 
 ### Starting a task
 
