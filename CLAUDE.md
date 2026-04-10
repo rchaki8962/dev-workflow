@@ -2,7 +2,7 @@
 
 dev-workflow: Claude Code plugin + Python CLI for durable, multi-session task management with a spec -> plan -> execution workflow. Tasks are organized into **spaces** (isolated namespaces).
 
-See [HOW_TO.md](HOW_TO.md) for usage guide. See [DESIGN.md](DESIGN.md) for architecture and design decisions.
+See [README.md](README.md) for usage guide. See [DESIGN.md](docs/DESIGN.md) for architecture and design decisions.
 
 ## Quick reference
 

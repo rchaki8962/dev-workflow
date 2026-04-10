@@ -6,7 +6,7 @@ class TestValidateSpaceName:
         validate_space_name("personal")  # no error
 
     def test_valid_with_hyphens(self):
-        validate_space_name("harness-eng")
+        validate_space_name("my-team")
 
     def test_valid_with_numbers(self):
         validate_space_name("team-42")
@@ -130,17 +130,17 @@ class TestSpaceExists:
 class TestSpaceEnsure:
     def test_creates_if_missing(self, tmp_path):
         mgr = SpaceManager(tmp_path)
-        space = mgr.ensure("harness")
-        assert space.name == "harness"
-        assert mgr.exists("harness")
+        space = mgr.ensure("default")
+        assert space.name == "default"
+        assert mgr.exists("default")
 
     def test_returns_existing(self, tmp_path):
         mgr = SpaceManager(tmp_path)
-        mgr.create("harness", "Original description")
-        space = mgr.ensure("harness")
+        mgr.create("default", "Original description")
+        space = mgr.ensure("default")
         assert space.description == "Original description"
 
     def test_auto_creates_spaces_json(self, tmp_path):
         mgr = SpaceManager(tmp_path)
-        mgr.ensure("harness")
+        mgr.ensure("default")
         assert (tmp_path / "spaces.json").exists()

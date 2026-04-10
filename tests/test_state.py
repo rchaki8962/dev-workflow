@@ -268,9 +268,9 @@ class TestSpaceField:
 
     def test_space_in_json(self, tmp_path: Path):
         mgr = StateManager(tmp_path / "state")
-        mgr.save(_make_task(slug="my-task", space="harness"))
+        mgr.save(_make_task(slug="my-task", space="default"))
         raw = json.loads((tmp_path / "state" / "my-task.json").read_text())
-        assert raw["space"] == "harness"
+        assert raw["space"] == "default"
 
     def test_missing_space_defaults_empty(self, tmp_path: Path):
         """Backward compat: old JSON without space field loads with space=''."""

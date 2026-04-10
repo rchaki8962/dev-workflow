@@ -41,10 +41,10 @@ def _create_task_via_manager(base_dir: str, title: str = "Test task", slug: str 
     """Create a task through the manager (not CLI) for setup purposes."""
     base = Path(base_dir)
     config = Config(base_dir=base)
-    config._active_space = "harness"
+    config._active_space = "default"
     # Create the space directory structure
-    (base / "harness" / "state").mkdir(parents=True, exist_ok=True)
-    (base / "harness" / "tasks").mkdir(parents=True, exist_ok=True)
+    (base / "default" / "state").mkdir(parents=True, exist_ok=True)
+    (base / "default" / "tasks").mkdir(parents=True, exist_ok=True)
     store = FileTaskStore(config.space_dir)
     manager = TaskManager(store, config)
     return manager.create_task(title=title, workspaces=[base], slug_override=slug, prompt=prompt)
@@ -54,10 +54,10 @@ def _get_store_and_config(base_dir: str) -> tuple[FileTaskStore, Config]:
     """Helper to get store and config for a base directory with space setup."""
     base = Path(base_dir)
     config = Config(base_dir=base)
-    config._active_space = "harness"
+    config._active_space = "default"
     # Create the space directory structure if it doesn't exist
-    (base / "harness" / "state").mkdir(parents=True, exist_ok=True)
-    (base / "harness" / "tasks").mkdir(parents=True, exist_ok=True)
+    (base / "default" / "state").mkdir(parents=True, exist_ok=True)
+    (base / "default" / "tasks").mkdir(parents=True, exist_ok=True)
     store = FileTaskStore(config.space_dir)
     return store, config
 

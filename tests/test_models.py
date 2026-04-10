@@ -181,9 +181,9 @@ class TestTaskSpaceField:
             task_id="2026-04-08-test", slug="test", title="Test",
             summary="", stage=Stage.SPEC, workspaces=[Path(".")],
             task_folder=Path("/tmp/test"), created=now, updated=now,
-            space="harness",
+            space="default",
         )
-        assert task.space == "harness"
+        assert task.space == "default"
 
 
 class TestSubtaskEntry:

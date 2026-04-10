@@ -21,10 +21,10 @@ from dev_workflow.task import TaskManager
 @pytest.fixture
 def setup(tmp_path):
     config = Config(base_dir=tmp_path)
-    config._active_space = "harness"
+    config._active_space = "default"
     # Create the space directory structure so FileTaskStore works
-    (tmp_path / "harness" / "state").mkdir(parents=True)
-    (tmp_path / "harness" / "tasks").mkdir(parents=True)
+    (tmp_path / "default" / "state").mkdir(parents=True)
+    (tmp_path / "default" / "tasks").mkdir(parents=True)
     store = FileTaskStore(config.space_dir)
     manager = TaskManager(store, config)
     return manager, config, store
@@ -354,10 +354,10 @@ class TestCreateTaskSpace:
     def test_space_set_from_config(self, setup, tmp_path):
         manager, config, store = setup
         task = manager.create_task("Build CSV export", workspaces=[tmp_path])
-        assert task.space == "harness"
+        assert task.space == "default"
 
     def test_space_persisted_in_state(self, setup, tmp_path):
         manager, config, store = setup
         task = manager.create_task("Build CSV export", workspaces=[tmp_path])
         loaded = store.load_task(task.slug)
-        assert loaded.space == "harness"
+        assert loaded.space == "default"

@@ -179,7 +179,7 @@ class TestTaskCreationFlow:
 
     def test_state_json_created(self, runner, base, tmp_path):
         _create_task(runner, base, "My Feature", "my-feature")
-        state_dir = tmp_path / "harness" / "state"
+        state_dir = tmp_path / "default" / "state"
         state_files = list(state_dir.glob("*.json"))
         assert len(state_files) == 1
         state_data = json.loads(state_files[0].read_text())
@@ -695,15 +695,15 @@ class TestSpaceIntegration:
         assert "beta" in spaces
 
     def test_default_space_auto_created(self, runner, base):
-        """Default 'harness' space should be auto-created on first task."""
+        """Default space should be auto-created on first task."""
         result = cli(runner, base, ["task", "start", "First Task", "--prompt", "test"])
         assert result.exit_code == 0
         result = cli(runner, base, ["space", "list", "--format", "json"])
         data = json.loads(result.output)
-        assert any(s["name"] == "harness" for s in data)
+        assert any(s["name"] == "default" for s in data)
 
     def test_space_flag_overrides_default(self, runner, base):
-        """--space flag should override default harness space."""
+        """--space flag should override the default space."""
         cli(runner, base, ["space", "create", "custom"])
         result = cli(runner, base, ["--space", "custom", "task", "start", "Custom Task", "--prompt", "test", "--format", "json"])
         data = json.loads(result.output)

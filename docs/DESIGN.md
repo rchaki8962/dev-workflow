@@ -108,8 +108,8 @@ One JSON file per task in `<space>/state/<slug>.json`:
   "stage": "spec",
   "progress": "0/0 subtasks",
   "workspaces": ["~/workspace/my-api"],
-  "task_folder": "~/.dev-workflow/harness/tasks/2026-04-08-csv-export/",
-  "space": "harness",
+  "task_folder": "~/.dev-workflow/default/tasks/2026-04-08-csv-export/",
+  "space": "default",
   "created": "2026-04-08T11:05:00Z",
   "updated": "2026-04-08T11:05:00Z"
 }
@@ -125,7 +125,7 @@ One JSON file per task in `<space>/state/<slug>.json`:
 
 ```json
 [
-  {"name": "harness", "description": "Default workspace", "created": "2026-04-08T12:00:00Z"},
+  {"name": "default", "description": "Default workspace", "created": "2026-04-08T12:00:00Z"},
   {"name": "personal", "description": "Personal projects", "created": "2026-04-08T12:05:00Z"}
 ]
 ```
@@ -139,7 +139,7 @@ One JSON file per task in `<space>/state/<slug>.json`:
 class Config:
     base_dir: Path
     strip_words: list[str]
-    default_space: str = "harness"
+    default_space: str = "default"
 
     # _active_space: str -- set post-init, NOT a dataclass field (avoids serialization)
 
@@ -164,7 +164,7 @@ Resolution order (first match wins):
 1. `--space` CLI flag
 2. `DEV_WORKFLOW_SPACE` env var
 3. `default_space` from config file
-4. Hardcoded default: `"harness"`
+4. Hardcoded default: `"default"`
 
 Resolved once at CLI startup. Every command in that invocation operates within the same space.
 

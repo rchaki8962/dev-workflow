@@ -61,10 +61,10 @@ Build the main processing pipeline.
 @pytest.fixture
 def env(tmp_path):
     config = Config(base_dir=tmp_path)
-    config._active_space = "harness"
+    config._active_space = "default"
     # Create the space directory structure
-    (tmp_path / "harness" / "state").mkdir(parents=True)
-    (tmp_path / "harness" / "tasks").mkdir(parents=True)
+    (tmp_path / "default" / "state").mkdir(parents=True)
+    (tmp_path / "default" / "tasks").mkdir(parents=True)
     store = FileTaskStore(config.space_dir)
     task_mgr = TaskManager(store, config)
     stage_mgr = StageManager(store, config)

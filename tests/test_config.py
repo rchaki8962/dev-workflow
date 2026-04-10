@@ -20,13 +20,13 @@ from dev_workflow.config import (
 class TestConfigDataclass:
     def test_state_dir_property(self):
         cfg = Config(base_dir=Path("/data"))
-        cfg._active_space = "harness"
-        assert cfg.state_dir == Path("/data/harness/state")
+        cfg._active_space = "default"
+        assert cfg.state_dir == Path("/data/default/state")
 
     def test_tasks_dir_property(self):
         cfg = Config(base_dir=Path("/data"))
-        cfg._active_space = "harness"
-        assert cfg.tasks_dir == Path("/data/harness/tasks")
+        cfg._active_space = "default"
+        assert cfg.tasks_dir == Path("/data/default/tasks")
 
     def test_default_strip_words(self):
         cfg = Config(base_dir=Path("/data"))
@@ -131,17 +131,17 @@ class TestLoadConfigFile:
 
 class TestConfigSpaceProperties:
     def test_space_dir(self, tmp_path):
-        cfg = Config(base_dir=tmp_path, default_space="harness")
-        cfg._active_space = "harness"
-        assert cfg.space_dir == tmp_path / "harness"
+        cfg = Config(base_dir=tmp_path, default_space="default")
+        cfg._active_space = "default"
+        assert cfg.space_dir == tmp_path / "default"
 
     def test_state_dir_routes_through_space(self, tmp_path):
-        cfg = Config(base_dir=tmp_path, default_space="harness")
+        cfg = Config(base_dir=tmp_path, default_space="default")
         cfg._active_space = "personal"
         assert cfg.state_dir == tmp_path / "personal" / "state"
 
     def test_tasks_dir_routes_through_space(self, tmp_path):
-        cfg = Config(base_dir=tmp_path, default_space="harness")
+        cfg = Config(base_dir=tmp_path, default_space="default")
         cfg._active_space = "personal"
         assert cfg.tasks_dir == tmp_path / "personal" / "tasks"
 
@@ -149,9 +149,9 @@ class TestConfigSpaceProperties:
         cfg = Config(base_dir=tmp_path)
         assert cfg.spaces_file == tmp_path / "spaces.json"
 
-    def test_default_space_is_harness(self):
+    def test_default_space_is_default(self):
         cfg = Config(base_dir=Path("/data"))
-        assert cfg.default_space == "harness"
+        assert cfg.default_space == "default"
 
 
 class TestLoadConfigSpace:
@@ -184,4 +184,4 @@ class TestLoadConfigSpace:
         monkeypatch.delenv("DEV_WORKFLOW_DIR", raising=False)
         monkeypatch.delenv("DEV_WORKFLOW_SPACE", raising=False)
         cfg = load_config(base_dir_override=str(tmp_path))
-        assert cfg._active_space == "harness"
+        assert cfg._active_space == "default"

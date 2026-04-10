@@ -18,7 +18,7 @@ DEFAULT_STRIP_WORDS = [
 class Config:
     base_dir: Path
     strip_words: list[str] = field(default_factory=lambda: list(DEFAULT_STRIP_WORDS))
-    default_space: str = "harness"
+    default_space: str = "default"
 
     def __post_init__(self):
         if not hasattr(self, "_active_space"):
@@ -85,7 +85,7 @@ def load_config(
     cfg = Config(
         base_dir=resolved_base,
         strip_words=strip_words if strip_words is not None else list(DEFAULT_STRIP_WORDS),
-        default_space=default_space if default_space is not None else "harness",
+        default_space=default_space if default_space is not None else "default",
     )
 
     # Resolve active space: CLI > env > config default
