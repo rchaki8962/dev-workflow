@@ -5,4 +5,4 @@ base_dir = "~/.dev-workflow"
 strip_words = ["add", "fix", "update", "implement", "create", "the", "a", "an", "for", "with", "to", "in"]
 
 [spaces]
-default = "harness"
+default = "personal"

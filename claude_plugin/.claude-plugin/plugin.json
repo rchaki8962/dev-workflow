@@ -1,0 +1,9 @@
+{
+  "name": "dev-workflow",
+  "version": "0.1.0",
+  "description": "Durable multi-session task management with a three-stage workflow (spec/plan/execution). Provides slash commands to create, track, and execute tasks organized into isolated spaces.",
+  "author": {
+    "name": "Rahul Chaki"
+  },
+  "repository": "https://github.com/rchaki8962/dev-workflow"
+}

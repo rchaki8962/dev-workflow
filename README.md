@@ -31,7 +31,21 @@ dev-workflow task list --all-spaces
 
 ## Claude Code Plugin
 
-When used as a Claude Code plugin, slash commands orchestrate the CLI with [Superpowers](https://github.com/anthropics/claude-code-plugins) skills:
+Install the Claude Code plugin (from within Claude Code):
+
+```
+/plugin marketplace add /path/to/dev-workflow/claude_plugin
+/plugin install dev-workflow
+```
+
+Or from the remote repo:
+
+```
+/plugin marketplace add rchaki8962/dev-workflow/claude_plugin
+/plugin install dev-workflow
+```
+
+Then use slash commands that orchestrate the CLI with [Superpowers](https://github.com/anthropics/claude-code-plugins) skills:
 
 ```
 /task-start Build CSV exporter       # create task, capture prompt
@@ -76,7 +90,7 @@ src/dev_workflow/          # Python package
   progress.py, plan_parser.py, templates.py, slug.py
 
 claude_plugin/             # Claude Code plugin
-  plugin.json              #   manifest
+  .claude-plugin/          #   plugin + marketplace manifests
   config.toml              #   plugin configuration
   commands/                #   slash command definitions (markdown)
 
