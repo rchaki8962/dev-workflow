@@ -182,7 +182,9 @@ class Store:
         ]
 
     def remove_space(self, name: str) -> None:
-        """Remove a space. Raises SpaceNotEmptyError if tasks exist."""
+        """Remove a space. Raises SpaceNotFoundError or SpaceNotEmptyError."""
+        if self.get_space(name) is None:
+            raise SpaceNotFoundError(f"Space '{name}' not found")
         count = self._conn.execute(
             "SELECT COUNT(*) FROM tasks WHERE space = ?", (name,)
         ).fetchone()[0]
@@ -279,7 +281,10 @@ class Store:
                 values.append(val)
         values.append(task_id)
         sql = f"UPDATE tasks SET {', '.join(parts)} WHERE task_id = ?"
-        self._conn.execute(sql, values)
+        cursor = self._conn.execute(sql, values)
+        if cursor.rowcount == 0:
+            self._conn.rollback()
+            raise TaskNotFoundError(f"Task '{task_id}' not found")
         self._conn.commit()
 
     def slug_exists(self, slug: str, space: str) -> bool:
@@ -330,8 +335,6 @@ class Store:
         """
         now = _now_iso()
         try:
-            cursor = self._conn.execute("BEGIN")
-
             # Insert checkpoint
             cursor = self._conn.execute(
                 """INSERT INTO checkpoints

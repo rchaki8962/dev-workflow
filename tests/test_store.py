@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from dev_workflow.errors import SpaceNotEmptyError, SpaceNotFoundError
+from dev_workflow.errors import SpaceNotEmptyError, SpaceNotFoundError, TaskNotFoundError
 from dev_workflow.models import Artifact, Checkpoint, Decision, Space, Task, Verification
 from dev_workflow.store import Store
 
@@ -215,6 +215,10 @@ class TestStoreSpaces:
         with pytest.raises(Exception):
             store.create_space("dup", "Second")
 
+    def test_remove_nonexistent_space_raises(self, store):
+        with pytest.raises(SpaceNotFoundError):
+            store.remove_space("nonexistent")
+
 
 class TestStoreTasks:
     def test_create_and_get_task(self, store):
@@ -274,6 +278,10 @@ class TestStoreTasks:
         store.create_task(_make_task(task_id="id2", slug="shared", space="b", task_folder="/tmp/b"))
         assert store.get_task("shared", "a").task_id == "id1"
         assert store.get_task("shared", "b").task_id == "id2"
+
+    def test_update_nonexistent_task_raises(self, store):
+        with pytest.raises(TaskNotFoundError):
+            store.update_task("nonexistent-id", summary="nope")
 
 
 class TestStoreCheckpointSave:
