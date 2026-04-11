@@ -1,0 +1,25 @@
+[tools]
+python = "3.13"
+
+[env]
+_.python.venv = { path = ".venv", create = true }
+
+[tasks.install]
+description = "Install dev-workflow CLI system-wide via pipx"
+run = "pipx install --force ."
+
+[tasks.dev]
+description = "Install in editable mode with dev dependencies"
+run = "pip install -e '.[dev]'"
+
+[tasks.test]
+description = "Run the test suite"
+run = "pytest"
+
+[tasks.lint]
+description = "Run pytest in verbose mode"
+run = "pytest -v"
+
+[tasks.package]
+description = "Build sdist and wheel"
+run = "python -m build"
