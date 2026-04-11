@@ -121,7 +121,6 @@ class TestStoreSpaces:
         store.remove_space("temp")
         assert store.get_space("temp") is None
 
-    @pytest.mark.skip("needs create_task from Task 7")
     def test_remove_space_with_tasks_raises(self, store):
         store.create_space("busy", "Has tasks")
         store.create_task(_make_task(slug="t1", space="busy", task_folder="/tmp/t1"))
@@ -144,3 +143,63 @@ class TestStoreSpaces:
         store.create_space("dup", "First")
         with pytest.raises(Exception):
             store.create_space("dup", "Second")
+
+
+class TestStoreTasks:
+    def test_create_and_get_task(self, store):
+        store.ensure_space("default")
+        task = _make_task()
+        store.create_task(task)
+        found = store.get_task("test-task", "default")
+        assert found is not None
+        assert found.task_id == "test-id-1"
+        assert found.title == "Test Task"
+        assert found.workspaces == []
+
+    def test_get_task_not_found(self, store):
+        store.ensure_space("default")
+        assert store.get_task("nope", "default") is None
+
+    def test_get_task_by_id(self, store):
+        store.ensure_space("default")
+        store.create_task(_make_task())
+        found = store.get_task_by_id("test-id-1")
+        assert found is not None
+        assert found.slug == "test-task"
+
+    def test_list_tasks_in_space(self, store):
+        store.ensure_space("default")
+        store.create_task(_make_task(task_id="id1", slug="t1", task_folder="/tmp/t1"))
+        store.create_task(_make_task(task_id="id2", slug="t2", task_folder="/tmp/t2"))
+        tasks = store.list_tasks(space="default")
+        assert len(tasks) == 2
+
+    def test_list_tasks_all_spaces(self, store):
+        store.ensure_space("a")
+        store.ensure_space("b")
+        store.create_task(_make_task(task_id="id1", slug="t1", space="a", task_folder="/tmp/t1"))
+        store.create_task(_make_task(task_id="id2", slug="t2", space="b", task_folder="/tmp/t2"))
+        tasks = store.list_tasks(space=None)
+        assert len(tasks) == 2
+
+    def test_update_task(self, store):
+        store.ensure_space("default")
+        store.create_task(_make_task())
+        store.update_task("test-id-1", summary="Updated", last_milestone="done")
+        task = store.get_task_by_id("test-id-1")
+        assert task.summary == "Updated"
+        assert task.last_milestone == "done"
+
+    def test_slug_exists(self, store):
+        store.ensure_space("default")
+        store.create_task(_make_task())
+        assert store.slug_exists("test-task", "default") is True
+        assert store.slug_exists("nope", "default") is False
+
+    def test_same_slug_different_spaces(self, store):
+        store.ensure_space("a")
+        store.ensure_space("b")
+        store.create_task(_make_task(task_id="id1", slug="shared", space="a", task_folder="/tmp/a"))
+        store.create_task(_make_task(task_id="id2", slug="shared", space="b", task_folder="/tmp/b"))
+        assert store.get_task("shared", "a").task_id == "id1"
+        assert store.get_task("shared", "b").task_id == "id2"

@@ -197,3 +197,120 @@ class Store:
         """Create space if it doesn't exist."""
         if self.get_space(name) is None:
             self.create_space(name, "")
+
+    # --- Tasks ---
+
+    def create_task(self, task: Task) -> None:
+        """Insert a new task record."""
+        self._conn.execute(
+            """INSERT INTO tasks
+            (task_id, slug, title, space, summary, last_milestone,
+             last_checkpoint_at, checkpoint_count, workspaces,
+             task_folder, created, updated, closed_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                task.task_id,
+                task.slug,
+                task.title,
+                task.space,
+                task.summary,
+                task.last_milestone,
+                task.last_checkpoint_at.isoformat() if task.last_checkpoint_at else None,
+                task.checkpoint_count,
+                json.dumps(task.workspaces),
+                str(task.task_folder),
+                task.created.isoformat(),
+                task.updated.isoformat(),
+                task.closed_at.isoformat() if task.closed_at else None,
+            ),
+        )
+        self._conn.commit()
+
+    def get_task(self, slug: str, space: str) -> Task | None:
+        """Get a task by slug and space, or None if not found."""
+        row = self._conn.execute(
+            "SELECT * FROM tasks WHERE slug = ? AND space = ?",
+            (slug, space),
+        ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_task(row)
+
+    def get_task_by_id(self, task_id: str) -> Task | None:
+        """Get a task by ID, or None if not found."""
+        row = self._conn.execute(
+            "SELECT * FROM tasks WHERE task_id = ?", (task_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_task(row)
+
+    def list_tasks(self, space: str | None = None) -> list[Task]:
+        """List tasks. If space is None, list across all spaces."""
+        if space is not None:
+            rows = self._conn.execute(
+                "SELECT * FROM tasks WHERE space = ? ORDER BY updated DESC",
+                (space,),
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                "SELECT * FROM tasks ORDER BY updated DESC"
+            ).fetchall()
+        return [self._row_to_task(r) for r in rows]
+
+    def update_task(self, task_id: str, **fields: object) -> None:
+        """Update specific fields on a task."""
+        if not fields:
+            return
+        allowed = {
+            "summary", "last_milestone", "last_checkpoint_at",
+            "checkpoint_count", "updated", "closed_at",
+        }
+        bad_keys = set(fields.keys()) - allowed
+        if bad_keys:
+            raise StoreError(f"Cannot update task fields: {bad_keys}")
+        parts = []
+        values = []
+        for key, val in fields.items():
+            parts.append(f"{key} = ?")
+            if isinstance(val, datetime):
+                values.append(val.isoformat())
+            else:
+                values.append(val)
+        values.append(task_id)
+        sql = f"UPDATE tasks SET {', '.join(parts)} WHERE task_id = ?"
+        self._conn.execute(sql, values)
+        self._conn.commit()
+
+    def slug_exists(self, slug: str, space: str) -> bool:
+        """Check if a slug exists in a space."""
+        row = self._conn.execute(
+            "SELECT 1 FROM tasks WHERE slug = ? AND space = ?",
+            (slug, space),
+        ).fetchone()
+        return row is not None
+
+    def _row_to_task(self, row: sqlite3.Row) -> Task:
+        return Task(
+            task_id=row["task_id"],
+            slug=row["slug"],
+            title=row["title"],
+            space=row["space"],
+            summary=row["summary"],
+            last_milestone=row["last_milestone"],
+            last_checkpoint_at=(
+                datetime.fromisoformat(row["last_checkpoint_at"])
+                if row["last_checkpoint_at"]
+                else None
+            ),
+            checkpoint_count=row["checkpoint_count"],
+            workspaces=json.loads(row["workspaces"]),
+            task_folder=Path(row["task_folder"]),
+            created=datetime.fromisoformat(row["created"]),
+            updated=datetime.fromisoformat(row["updated"]),
+            closed_at=(
+                datetime.fromisoformat(row["closed_at"])
+                if row["closed_at"]
+                else None
+            ),
+        )
