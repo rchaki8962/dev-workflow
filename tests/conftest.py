@@ -1,9 +1,6 @@
 """Shared test fixtures."""
 
 import pytest
-from pathlib import Path
-
-from dev_workflow.store import Store
 
 
 @pytest.fixture
@@ -17,6 +14,8 @@ def tmp_base_dir(tmp_path):
 @pytest.fixture
 def store(tmp_base_dir):
     """Fresh Store with auto-created schema."""
+    from dev_workflow.store import Store
+
     db_path = tmp_base_dir / "store.db"
     s = Store(db_path)
     yield s
