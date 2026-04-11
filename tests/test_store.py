@@ -377,3 +377,65 @@ class TestStoreCheckpointSave:
         # Original data should be intact
         task = store.get_task_by_id("test-id-1")
         assert task.checkpoint_count == 1
+
+
+class TestStoreReads:
+    def _setup_full_checkpoint(self, store):
+        """Create a task with one checkpoint containing all record types."""
+        store.ensure_space("default")
+        store.create_task(_make_task())
+        cp = _make_checkpoint()
+        d = _make_decision()
+        a = _make_artifact()
+        v = _make_verification()
+        store.save_checkpoint(cp, [d], [a], [v])
+
+    def test_get_checkpoints(self, store):
+        self._setup_full_checkpoint(store)
+        cps = store.get_checkpoints("test-id-1")
+        assert len(cps) == 1
+        assert cps[0].milestone == "test-milestone"
+        assert cps[0].user_directives == ["Do it fast"]
+        assert cps[0].insights == ["Interesting finding"]
+
+    def test_get_decisions(self, store):
+        self._setup_full_checkpoint(store)
+        ds = store.get_decisions("test-id-1")
+        assert len(ds) == 1
+        assert ds[0].decision_number == 1
+        assert ds[0].checkpoint_id is not None
+
+    def test_get_artifact_latest(self, store):
+        self._setup_full_checkpoint(store)
+        a = store.get_artifact_latest("test-id-1", "test-spec")
+        assert a is not None
+        assert a.version == 1
+        assert a.content == "# Spec\nContent here"
+
+    def test_get_artifact_latest_not_found(self, store):
+        self._setup_full_checkpoint(store)
+        assert store.get_artifact_latest("test-id-1", "nonexistent") is None
+
+    def test_get_next_decision_number(self, store):
+        self._setup_full_checkpoint(store)
+        assert store.get_next_decision_number("test-id-1") == 2
+
+    def test_get_next_decision_number_empty(self, store):
+        store.ensure_space("default")
+        store.create_task(_make_task())
+        assert store.get_next_decision_number("test-id-1") == 1
+
+    def test_get_next_checkpoint_number(self, store):
+        self._setup_full_checkpoint(store)
+        assert store.get_next_checkpoint_number("test-id-1") == 2
+
+    def test_get_next_checkpoint_number_empty(self, store):
+        store.ensure_space("default")
+        store.create_task(_make_task())
+        assert store.get_next_checkpoint_number("test-id-1") == 1
+
+    def test_get_verifications(self, store):
+        self._setup_full_checkpoint(store)
+        vs = store.get_verifications("test-id-1")
+        assert len(vs) == 1
+        assert vs[0].command == "pytest -v"
