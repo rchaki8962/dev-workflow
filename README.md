@@ -1,302 +1,104 @@
 # dev-workflow
 
-Durable, multi-session task management for coding agents. A Python CLI + Claude Code plugin that guides tasks through a structured **spec -> plan -> execution** workflow with formal review gates between stages.
+Checkpoint-oriented task continuity for agent-assisted development. A Python CLI that persists decisions, artifacts, and context across sessions so work can be resumed by any agent without losing history.
 
-Tasks are organized into **spaces** -- isolated namespaces for separating personal projects, org work, or different teams.
+Tasks are organized into **spaces** -- isolated namespaces for separating projects or teams.
 
 ## Why
 
-Long-running coding tasks span multiple sessions. Context is lost, work drifts, and quality suffers. dev-workflow solves this by:
+Long-running coding tasks span multiple sessions. Context is lost, decisions are forgotten, and new agents start from scratch. dev-workflow solves this by:
 
-- **Persisting everything to files** -- specs, plans, subtasks, progress, activity logs. Chats are disposable; files are the source of truth.
-- **Enforcing a stage workflow** -- no skipping from idea to code. Spec first, then plan, then execute. Each stage requires explicit approval to advance.
-- **Supporting multi-task, multi-space workflows** -- work on several tasks across isolated spaces, each at its own stage, resumable from any session.
+- **Checkpointing at meaningful moments** -- decisions, artifacts, verifications, and user directives are captured in structured snapshots, not lost in chat logs.
+- **SQLite as source of truth** -- all state lives in a single database. Task folders are a generated cache, deletable and regenerable.
+- **Progressive disclosure** -- HANDOFF.md gives an overview with links to detail files. Agents load what they need, not everything.
 
 ## Installation
 
-Two steps: install the Python CLI (the engine), then the Claude Code plugin (the interface).
-
-### From local clone
-
-If you've cloned the repo, run these from the repo root:
-
-**1. Install the CLI:**
-
 ```bash
 pip install -e .
-dev-workflow --help   # verify
+dev-workflow --help
 ```
 
-**2. Install the Claude Code plugin** (from within a Claude Code session):
-
-```
-/plugin marketplace add ./claude_plugin
-/plugin install dev-workflow
-```
-
-### From remote (no clone needed)
-
-**1. Install the CLI:**
-
-```bash
-pip install git+https://github.com/rchaki8962/dev-workflow.git
-dev-workflow --help   # verify
-```
-
-**2. Install the Claude Code plugin** (from within a Claude Code session):
-
-```
-/plugin marketplace add rchaki8962/dev-workflow/claude_plugin
-/plugin install dev-workflow
-```
-
-Both methods install the plugin at user scope -- available across all your projects.
-
-## Concepts
-
-**Task**: A unit of work that moves through three stages: spec, plan, execution. Each task gets a unique slug, a folder with structured files, and a state JSON entry.
-
-**Space**: An isolated namespace for tasks. Spaces keep work separated -- for example, personal projects vs. org work vs. different teams. Each space has its own `state/` and `tasks/` directories, so slugs can repeat across spaces without collision.
-
-**Stage**: Each task moves through `spec` -> `plan` -> `execution` -> `complete`. Stages advance only through formal review approval, never automatically.
+Requires Python 3.11+. Only runtime dependency: `click>=8.0`.
 
 ## Quick Start
 
-```
-/task-start Build CSV exporter
-/run-stage spec
-/stage-approve spec
-/run-stage plan
-/stage-approve plan
-/run-stage execution
-/stage-approve execution
-```
-
-## Usage
-
-The plugin provides slash commands that orchestrate the CLI with [Superpowers](https://github.com/obra/superpowers) skills. This is the intended way to use dev-workflow.
-
-### Starting a task
-
-```
-/task-start CSV Export Feature
-```
-
-Claude will create the task, ask you to describe what you want to build, save your response as the original prompt, and remember the slug for the session.
-
-### Running the spec stage
-
-```
-/run-stage spec
-```
-
-This runs `stage setup` -> Superpowers brainstorming skill -> `stage teardown`. The brainstorming skill asks clarifying questions, proposes approaches, and writes a design spec. Output goes to the task folder, not to `docs/superpowers/`.
-
-### Reviewing and approving
-
-```
-/stage-review spec       # creates a review template for a separate session
-/stage-approve spec      # approves the stage, advances task to plan
-```
-
-You can skip the formal review and go straight to approve if you're satisfied.
-
-### Running the plan stage
-
-```
-/run-stage plan
-```
-
-This reads the approved spec and invokes the writing-plans skill. Same flow: `stage setup` -> skill -> `stage teardown`.
-
-```
-/stage-approve plan      # advances task to execution
-```
-
-### Running the execution stage
-
-```
-/run-stage execution
-```
-
-This invokes subagent-driven-development to execute the plan task-by-task.
-
-```
-/stage-review execution
-/stage-approve execution  # marks task complete
-```
-
-### Other plugin commands
-
-```
-/task-list               # list tasks in active space
-/task-search query       # search tasks
-/task-status             # show current task details
-/task-switch slug        # switch session to a different task
-```
-
-### Working across multiple spaces
-
-**Terminal setup** -- create your spaces once:
-
 ```bash
-dev-workflow space create personal --description "Side projects"
-dev-workflow space create acme-eng --description "Acme engineering"
+# Create a task with an initial prompt
+dev-workflow init "Auth Middleware Rewrite" --prompt "Rewrite auth to use JWT..."
+
+# Work happens... then save a checkpoint
+echo '{"milestone": "spec-done", "summary": "Finalized JWT auth spec"}' | dev-workflow checkpoint auth-middleware-rewrite
+
+# Resume in a new session
+dev-workflow resume auth-middleware-rewrite --format json
+
+# Regenerate the task folder (markdown views)
+dev-workflow resume auth-middleware-rewrite --format md
 ```
 
-**Claude Code session for org work** (default space):
+## Concepts
 
-```
-/task-start Auth Middleware Rewrite
-> Rewrite the auth middleware to comply with new session token storage requirements...
-/run-stage spec
-/stage-approve spec
-/run-stage plan
-```
+**Task**: A unit of work identified by a slug. Tasks accumulate checkpoints over time. Each task has a folder with generated markdown views for human and agent consumption.
 
-**Claude Code session for personal project** -- set space via env var or flag:
+**Checkpoint**: A structured snapshot of progress -- milestone label, summary, decisions, artifacts, verifications, user directives, insights, open questions, and next steps. Checkpoints are freeform and happen whenever meaningful progress occurs.
 
-```bash
-# Option A: env var (applies to entire shell session)
-export DEV_WORKFLOW_SPACE=personal
-claude
+**Space**: An isolated namespace for tasks. Same slug can exist in different spaces without collision.
 
-# Option B: always pass --space in CLI commands
-dev-workflow --space personal task list
-```
-
-Then in Claude Code:
-
-```
-/task-start Blog Engine
-> Build a static blog generator with markdown support...
-/run-stage spec
-```
-
-### Switching between tasks within a space
-
-Inside a Claude Code session, you work on one task at a time. The slug is remembered per-session:
-
-```
-/task-switch auth-refactor     # load context for this task
-/run-stage execution           # continues where you left off
-
-/task-switch csv-export        # switch to another task
-/task-status                   # see where it stands
-/run-stage plan                # pick up from the plan stage
-```
-
-### Key rules
-
-- **One space per CLI invocation.** Every command operates within the active space. Cross-space visibility is only through `task list --all-spaces`.
-- **One task per session.** `/task-start` or `/task-switch` sets the session's active task. Subsequent `/run-stage`, `/stage-review`, `/stage-approve` use that slug.
-- **Tasks don't move between spaces.** The space is set at creation time and is immutable.
-- **Stages only advance through approval.** `stage teardown` does NOT advance the stage. Only `review approve` does.
+**Artifact**: A versioned document (spec, plan, design doc, config) stored within a checkpoint. Artifacts are deduplicated by SHA-256 checksum -- if content hasn't changed, no new version is created.
 
 ## CLI Reference
 
-The Python CLI handles all deterministic operations under the hood. You can also use it directly from the terminal.
-
 ### Task commands
 
-**Create a task:**
-
 ```bash
-dev-workflow task start "CSV Export Feature" --prompt "Build a CSV exporter for user data"
-dev-workflow task start "Auth Refactor" --slug auth-refactor --workspace /path/to/repo
-dev-workflow --space personal task start "Blog Engine" --prompt "Static site generator"
+dev-workflow init "Task Title" --prompt "Description..."   # create task
+dev-workflow init "Task Title" --workspace /path/to/repo   # with workspace path
+dev-workflow status                                         # all tasks in active space
+dev-workflow status <slug>                                  # specific task detail
+dev-workflow list                                           # list tasks in active space
+dev-workflow list --all-spaces                              # list across all spaces
 ```
 
-Options: `--slug` (custom slug), `--prompt` (inline prompt text), `--prompt-file` (path to prompt file), `--workspace` (working directory, repeatable), `--format json|table`.
-
-**List tasks:**
+### Checkpoint commands
 
 ```bash
-dev-workflow task list                          # active space only
-dev-workflow task list --stage spec             # filter by stage
-dev-workflow task list --all-spaces             # all tasks across all spaces
-dev-workflow task list --all-spaces --format json
+# Via stdin
+echo '<json>' | dev-workflow checkpoint <slug>
+
+# Via file
+dev-workflow checkpoint <slug> --payload payload.json
 ```
 
-**Search, info, switch:**
+The checkpoint payload is a JSON object with required fields `milestone` and `summary`, plus optional `decisions`, `artifacts`, `verifications`, `user_directives`, `insights`, `next_steps`, `open_questions`, and `resolved_questions`. See `skills/task-checkpoint.md` for the full schema.
+
+### Resume commands
 
 ```bash
-dev-workflow task search "csv"                  # substring match on slug/title/summary
-dev-workflow task info csv-export               # show task details
-dev-workflow task switch csv-export             # load task context (progress + spec + plan summaries)
+dev-workflow resume <slug> --format json   # structured context bundle
+dev-workflow resume <slug> --format md     # regenerate folder, return HANDOFF.md path
+dev-workflow regenerate <slug>             # regenerate task folder only
 ```
 
-### Stage commands
+### Space commands
 
 ```bash
-dev-workflow stage setup spec --task csv-export --format json
-dev-workflow stage teardown spec --task csv-export
-dev-workflow stage status --task csv-export
-```
-
-### Review commands
-
-```bash
-dev-workflow review setup spec --task csv-export --format json
-dev-workflow review approve spec --task csv-export
-```
-
-Approving a review is the only way to advance a task to the next stage.
-
-### Spaces
-
-**Creating spaces:**
-
-```bash
-dev-workflow space create personal --description "Personal projects"
-dev-workflow space create acme-eng --description "Acme engineering"
-```
-
-Space names must be lowercase alphanumeric with hyphens, max 40 characters.
-
-**Listing spaces:**
-
-```bash
+dev-workflow space create <name> --description "..."
 dev-workflow space list
+dev-workflow space info <name>
+dev-workflow space remove <name>    # fails if space has tasks
 ```
 
-Output:
+Space names must be lowercase alphanumeric with hyphens, starting with a letter or digit.
 
-```
-  default              Default workspace              3 tasks
-  personal             Personal projects              1 task
-  acme-eng             Acme engineering               0 tasks
-```
+### Space resolution
 
-JSON output: `dev-workflow space list --format json`
+The active space is resolved in this order (first match wins):
 
-**Space info and removal:**
-
-```bash
-dev-workflow space info personal
-dev-workflow space remove temp-space           # fails if space has tasks
-dev-workflow space remove temp-space --force   # removes even with tasks
-```
-
-**Default space:** The default space is `default`. It is auto-created on first use -- no setup required.
-
-**Selecting the active space** -- resolution order (first match wins):
-
-1. `--space` CLI flag: `dev-workflow --space personal task list`
-2. `DEV_WORKFLOW_SPACE` env var: `export DEV_WORKFLOW_SPACE=personal`
-3. `default_space` in config file (`claude_plugin/config.toml` under `[spaces]`)
-4. Hardcoded default: `default`
-
-**Checking across spaces:**
-
-```bash
-dev-workflow task list --all-spaces
-
-# Output:
-#   [default]     auth-refactor    execution    Auth Middleware Rewrite
-#   [default]     csv-export       plan         CSV Export Feature
-#   [personal]    blog-engine      spec         Blog Engine
-```
+1. `--space` CLI flag
+2. `DEV_WORKFLOW_SPACE` environment variable
+3. `default_space` in `~/.dev-workflow/config.toml`
+4. `"default"`
 
 ## Data Directory
 
@@ -304,88 +106,82 @@ All data lives under `~/.dev-workflow/` (configurable via `--base-dir` or `DEV_W
 
 ```
 ~/.dev-workflow/
-  spaces.json                    # space registry (name, description, created)
-  default/                       # default space
-    state/
-      csv-export.json            # task state (stage, metadata, timestamps)
-      auth-refactor.json
+  store.db                         # SQLite database (source of truth)
+  config.toml                      # optional config (default_space)
+  default/                         # default space
     tasks/
-      2026-04-08-csv-export/     # task folder
-        00-progress.md           # current status dashboard
-        01-original-prompt.md    # user's original description
-        10-spec/
-          spec-v1.md             # draft spec
-          spec-approved.md       # approved spec (copied from latest draft)
-        20-plan/
-          plan-v1.md
-          plan-approved.md
-        30-execution/
-          subtask-01.md, subtask-02.md, ...
-          implementation-summary.md
-        90-logs/
-          activity-log.md        # append-only activity history
-  personal/                      # another space, same structure
-    state/
+      2026-04-11-auth-rewrite/     # generated task folder (cache)
+        HANDOFF.md                 # index -- overview with links
+        context/
+          original-prompt.md       # initial task prompt
+          current-state.md         # latest checkpoint state
+          decisions.md             # all decisions with rationale
+          open-questions.md        # unresolved questions
+        artifacts/
+          spec-auth-spec-v2.md     # versioned artifacts
+        record/
+          checkpoints.md           # chronological checkpoint log
+          development-record.md    # archival summary
+  personal/                        # another space, same structure
     tasks/
 ```
+
+The task folder is a **generated cache**. Delete it anytime -- `dev-workflow regenerate <slug>` rebuilds it from SQLite.
 
 ## Architecture
 
 ```
-Claude Code Plugin Commands (orchestrators)
-    |
-    |---> Python CLI (deterministic mechanics)
-    |       TaskManager, StageManager, FileTaskStore
-    |
-    |---> Superpowers Skills (creative work)
-            brainstorming, writing-plans, subagent-driven-development
+CLI (Click)
+  |
+  |---> Domain Logic (space, task, checkpoint, resume, views)
+  |       Stateless functions that accept a Store instance
+  |
+  |---> Storage (SQLite via Store)
+          Single module importing sqlite3
+          WAL mode, foreign keys, atomic transactions
 ```
 
-- **Python CLI** handles all deterministic operations: task CRUD, stage lifecycle, file I/O, state management. Fully testable, no Claude Code dependency.
-- **Plugin commands** are thin orchestrators that call the CLI and invoke Superpowers skills.
-- **Spaces** provide data isolation via Config wiring -- downstream code (store, stage, progress) is unaware of spaces.
+- **Three-layer separation**: CLI is a thin wrapper over domain functions. Domain functions call the Store. Only `store.py` imports `sqlite3`.
+- **Checkpoint-oriented**: No rigid stage pipeline. Users checkpoint at meaningful moments.
+- **Progressive disclosure**: HANDOFF.md is a summary with links. Detail files have full content. No duplication between files.
 
-See [DESIGN.md](docs/DESIGN.md) for the full architecture document.
+## Agent Skills
+
+The `skills/` directory contains markdown skill files for agent integration:
+
+- `skills/task-awareness.md` -- Session start flow, checkpoint-worthy signal detection
+- `skills/task-checkpoint.md` -- Checkpoint payload drafting, review flow, CLI invocation
 
 ## Project Structure
 
 ```
 src/dev_workflow/          # Python package
-  models.py                #   dataclasses: Task, Space, Stage, Spec, Plan, etc.
-  config.py                #   config + space resolution
-  space.py                 #   SpaceManager CRUD
-  store.py                 #   TaskStore protocol + FileTaskStore
-  state.py                 #   per-task JSON state
-  task.py                  #   TaskManager
-  stage.py                 #   StageManager
-  cli.py                   #   Click CLI
-  progress.py, plan_parser.py, templates.py, slug.py
+  models.py                #   dataclasses: Task, Space, Checkpoint, Decision, Artifact, etc.
+  errors.py                #   exception hierarchy (DevWorkflowError base)
+  config.py                #   config loading + space resolution
+  slug.py                  #   slug generation with collision handling
+  store.py                 #   SQLite storage layer
+  space.py                 #   space domain logic
+  task.py                  #   task init + lookup
+  checkpoint.py            #   checkpoint validation + creation
+  views.py                 #   markdown view generation
+  resume.py                #   context bundle synthesis
+  cli.py                   #   Click CLI entry point
 
-claude_plugin/             # Claude Code plugin
-  .claude-plugin/          #   plugin + marketplace manifests
-  config.toml              #   plugin configuration
-  commands/                #   slash command definitions (markdown)
-
-tests/                     # 423 tests
+skills/                    # agent skill files
+tests/                     # 94 tests
 ```
 
 ## Development
 
 ```bash
-# Setup
 uv venv --python 3.13
 uv pip install -e ".[dev]"
-
-# Run tests
-uv run pytest
-uv run pytest tests/test_cli.py -v          # specific module
-uv run pytest tests/test_space.py -k ensure  # specific test
-
-# CLI
+uv run pytest                                    # full suite
+uv run pytest tests/test_cli.py -v               # specific module
+uv run pytest tests/test_store.py -k checkpoint   # specific test
 uv run dev-workflow --help
 ```
-
-Requires Python 3.11+. Only runtime dependency: `click>=8.0`.
 
 ## License
 

@@ -1,8 +1,0 @@
-[paths]
-base_dir = "~/.dev-workflow"
-
-[slug]
-strip_words = ["add", "fix", "update", "implement", "create", "the", "a", "an", "for", "with", "to", "in"]
-
-[spaces]
-default = "personal"
