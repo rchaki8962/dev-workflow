@@ -314,3 +314,262 @@ class Store:
                 else None
             ),
         )
+
+    # --- Checkpoints ---
+
+    def save_checkpoint(
+        self,
+        checkpoint: Checkpoint,
+        decisions: list[Decision],
+        artifacts: list[Artifact],
+        verifications: list[Verification],
+    ) -> int:
+        """Atomically save a checkpoint with all related records.
+
+        Returns the checkpoint number.
+        """
+        now = _now_iso()
+        try:
+            cursor = self._conn.execute("BEGIN")
+
+            # Insert checkpoint
+            cursor = self._conn.execute(
+                """INSERT INTO checkpoints
+                (task_id, checkpoint_number, milestone, summary,
+                 user_directives, insights, next_steps,
+                 open_questions, resolved_questions, created)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    checkpoint.task_id,
+                    checkpoint.checkpoint_number,
+                    checkpoint.milestone,
+                    checkpoint.summary,
+                    json.dumps(checkpoint.user_directives),
+                    json.dumps(checkpoint.insights),
+                    json.dumps(checkpoint.next_steps),
+                    json.dumps(checkpoint.open_questions),
+                    json.dumps(checkpoint.resolved_questions),
+                    checkpoint.created.isoformat(),
+                ),
+            )
+            checkpoint_id = cursor.lastrowid
+
+            # Insert decisions
+            for d in decisions:
+                self._conn.execute(
+                    """INSERT INTO decisions
+                    (task_id, checkpoint_id, decision_number, title,
+                     rationale, alternatives, context, created)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        d.task_id,
+                        checkpoint_id,
+                        d.decision_number,
+                        d.title,
+                        d.rationale,
+                        json.dumps(d.alternatives),
+                        d.context,
+                        d.created.isoformat(),
+                    ),
+                )
+
+            # Upsert artifacts (skip if checksum matches latest)
+            for a in artifacts:
+                latest = self._get_artifact_latest_raw(a.task_id, a.name)
+                if latest is not None and latest["checksum"] == a.checksum:
+                    continue  # Content unchanged, skip
+                next_version = (
+                    (latest["version"] + 1) if latest is not None else 1
+                )
+                self._conn.execute(
+                    """INSERT INTO artifacts
+                    (task_id, checkpoint_id, type, name, version,
+                     description, content, checksum, created)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        a.task_id,
+                        checkpoint_id,
+                        a.type,
+                        a.name,
+                        next_version,
+                        a.description,
+                        a.content,
+                        a.checksum,
+                        a.created.isoformat(),
+                    ),
+                )
+
+            # Insert verifications
+            for v in verifications:
+                self._conn.execute(
+                    """INSERT INTO verifications
+                    (task_id, checkpoint_id, type, result, detail, command, created)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        v.task_id,
+                        checkpoint_id,
+                        v.type,
+                        v.result,
+                        v.detail,
+                        v.command,
+                        v.created.isoformat(),
+                    ),
+                )
+
+            # Update task record
+            self._conn.execute(
+                """UPDATE tasks SET
+                    summary = ?, last_milestone = ?, last_checkpoint_at = ?,
+                    checkpoint_count = checkpoint_count + 1, updated = ?
+                WHERE task_id = ?""",
+                (
+                    checkpoint.summary,
+                    checkpoint.milestone,
+                    now,
+                    now,
+                    checkpoint.task_id,
+                ),
+            )
+
+            self._conn.commit()
+            return checkpoint.checkpoint_number
+
+        except Exception:
+            self._conn.rollback()
+            raise
+
+    def _get_artifact_latest_raw(self, task_id: str, name: str) -> dict | None:
+        """Get the latest version of an artifact as a raw dict (internal use)."""
+        row = self._conn.execute(
+            """SELECT version, checksum FROM artifacts
+            WHERE task_id = ? AND name = ?
+            ORDER BY version DESC LIMIT 1""",
+            (task_id, name),
+        ).fetchone()
+        if row is None:
+            return None
+        return {"version": row["version"], "checksum": row["checksum"]}
+
+    # --- Read methods ---
+
+    def get_checkpoints(self, task_id: str) -> list[Checkpoint]:
+        """Get all checkpoints for a task, ordered by number."""
+        rows = self._conn.execute(
+            """SELECT * FROM checkpoints
+            WHERE task_id = ? ORDER BY checkpoint_number""",
+            (task_id,),
+        ).fetchall()
+        return [self._row_to_checkpoint(r) for r in rows]
+
+    def get_decisions(self, task_id: str) -> list[Decision]:
+        """Get all decisions for a task, ordered by number."""
+        rows = self._conn.execute(
+            """SELECT * FROM decisions
+            WHERE task_id = ? ORDER BY decision_number""",
+            (task_id,),
+        ).fetchall()
+        return [self._row_to_decision(r) for r in rows]
+
+    def get_artifacts(self, task_id: str) -> list[Artifact]:
+        """Get all artifact versions for a task."""
+        rows = self._conn.execute(
+            """SELECT * FROM artifacts
+            WHERE task_id = ? ORDER BY name, version""",
+            (task_id,),
+        ).fetchall()
+        return [self._row_to_artifact(r) for r in rows]
+
+    def get_artifact_latest(self, task_id: str, name: str) -> Artifact | None:
+        """Get the latest version of a named artifact."""
+        row = self._conn.execute(
+            """SELECT * FROM artifacts
+            WHERE task_id = ? AND name = ?
+            ORDER BY version DESC LIMIT 1""",
+            (task_id, name),
+        ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_artifact(row)
+
+    def get_verifications(self, task_id: str) -> list[Verification]:
+        """Get all verifications for a task."""
+        rows = self._conn.execute(
+            """SELECT * FROM verifications
+            WHERE task_id = ? ORDER BY id""",
+            (task_id,),
+        ).fetchall()
+        return [self._row_to_verification(r) for r in rows]
+
+    def get_next_decision_number(self, task_id: str) -> int:
+        """Get the next decision number for a task."""
+        row = self._conn.execute(
+            "SELECT MAX(decision_number) FROM decisions WHERE task_id = ?",
+            (task_id,),
+        ).fetchone()
+        current_max = row[0] if row[0] is not None else 0
+        return current_max + 1
+
+    def get_next_checkpoint_number(self, task_id: str) -> int:
+        """Get the next checkpoint number for a task."""
+        row = self._conn.execute(
+            "SELECT MAX(checkpoint_number) FROM checkpoints WHERE task_id = ?",
+            (task_id,),
+        ).fetchone()
+        current_max = row[0] if row[0] is not None else 0
+        return current_max + 1
+
+    # --- Row converters ---
+
+    def _row_to_checkpoint(self, row: sqlite3.Row) -> Checkpoint:
+        return Checkpoint(
+            id=row["id"],
+            task_id=row["task_id"],
+            checkpoint_number=row["checkpoint_number"],
+            milestone=row["milestone"],
+            summary=row["summary"],
+            user_directives=json.loads(row["user_directives"]),
+            insights=json.loads(row["insights"]),
+            next_steps=json.loads(row["next_steps"]),
+            open_questions=json.loads(row["open_questions"]),
+            resolved_questions=json.loads(row["resolved_questions"]),
+            created=datetime.fromisoformat(row["created"]),
+        )
+
+    def _row_to_decision(self, row: sqlite3.Row) -> Decision:
+        return Decision(
+            id=row["id"],
+            task_id=row["task_id"],
+            checkpoint_id=row["checkpoint_id"],
+            decision_number=row["decision_number"],
+            title=row["title"],
+            rationale=row["rationale"],
+            alternatives=json.loads(row["alternatives"]),
+            context=row["context"],
+            created=datetime.fromisoformat(row["created"]),
+        )
+
+    def _row_to_artifact(self, row: sqlite3.Row) -> Artifact:
+        return Artifact(
+            id=row["id"],
+            task_id=row["task_id"],
+            checkpoint_id=row["checkpoint_id"],
+            type=row["type"],
+            name=row["name"],
+            version=row["version"],
+            description=row["description"],
+            content=row["content"],
+            checksum=row["checksum"],
+            created=datetime.fromisoformat(row["created"]),
+        )
+
+    def _row_to_verification(self, row: sqlite3.Row) -> Verification:
+        return Verification(
+            id=row["id"],
+            task_id=row["task_id"],
+            checkpoint_id=row["checkpoint_id"],
+            type=row["type"],
+            result=row["result"],
+            detail=row["detail"],
+            command=row["command"],
+            created=datetime.fromisoformat(row["created"]),
+        )

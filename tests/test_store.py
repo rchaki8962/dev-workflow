@@ -1,5 +1,6 @@
 """Tests for the SQLite store."""
 
+import hashlib
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -7,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from dev_workflow.errors import SpaceNotEmptyError, SpaceNotFoundError
-from dev_workflow.models import Space, Task
+from dev_workflow.models import Artifact, Checkpoint, Decision, Space, Task, Verification
 from dev_workflow.store import Store
 
 
@@ -33,6 +34,76 @@ def _make_task(
         created=now,
         updated=now,
         closed_at=None,
+    )
+
+
+def _make_checkpoint(
+    task_id: str = "test-id-1",
+    checkpoint_number: int = 1,
+    milestone: str = "test-milestone",
+) -> Checkpoint:
+    return Checkpoint(
+        id=None,
+        task_id=task_id,
+        checkpoint_number=checkpoint_number,
+        milestone=milestone,
+        summary="Test summary",
+        user_directives=["Do it fast"],
+        insights=["Interesting finding"],
+        next_steps=["Next thing"],
+        open_questions=["Open q?"],
+        resolved_questions=["Resolved q"],
+        created=datetime.now(timezone.utc),
+    )
+
+
+def _make_decision(
+    task_id: str = "test-id-1",
+    decision_number: int = 1,
+) -> Decision:
+    return Decision(
+        id=None,
+        task_id=task_id,
+        checkpoint_id=None,
+        decision_number=decision_number,
+        title="Use JWT",
+        rationale="Stateless",
+        alternatives=["sessions", "oauth"],
+        context="User wants scaling",
+        created=datetime.now(timezone.utc),
+    )
+
+
+def _make_artifact(
+    task_id: str = "test-id-1",
+    name: str = "test-spec",
+    version: int = 1,
+    content: str = "# Spec\nContent here",
+) -> Artifact:
+    return Artifact(
+        id=None,
+        task_id=task_id,
+        checkpoint_id=None,
+        type="spec",
+        name=name,
+        version=version,
+        description="Test spec",
+        content=content,
+        checksum=hashlib.sha256(content.encode()).hexdigest(),
+        created=datetime.now(timezone.utc),
+    )
+
+
+def _make_verification(task_id: str = "test-id-1") -> Verification:
+    return Verification(
+        id=None,
+        task_id=task_id,
+        checkpoint_id=None,
+        type="test-run",
+        result="pass",
+        detail="42/42 tests",
+        command="pytest -v",
+        created=datetime.now(timezone.utc),
     )
 
 
@@ -203,3 +274,106 @@ class TestStoreTasks:
         store.create_task(_make_task(task_id="id2", slug="shared", space="b", task_folder="/tmp/b"))
         assert store.get_task("shared", "a").task_id == "id1"
         assert store.get_task("shared", "b").task_id == "id2"
+
+
+class TestStoreCheckpointSave:
+    def _setup_task(self, store):
+        store.ensure_space("default")
+        store.create_task(_make_task())
+
+    def test_save_minimal_checkpoint(self, store):
+        self._setup_task(store)
+        cp = _make_checkpoint()
+        num = store.save_checkpoint(cp, [], [], [])
+        assert num == 1
+
+    def test_save_updates_task_record(self, store):
+        self._setup_task(store)
+        cp = _make_checkpoint()
+        store.save_checkpoint(cp, [], [], [])
+        task = store.get_task_by_id("test-id-1")
+        assert task.checkpoint_count == 1
+        assert task.last_milestone == "test-milestone"
+        assert task.summary == "Test summary"
+        assert task.last_checkpoint_at is not None
+
+    def test_save_with_decisions(self, store):
+        self._setup_task(store)
+        cp = _make_checkpoint()
+        d = _make_decision()
+        store.save_checkpoint(cp, [d], [], [])
+        decisions = store.get_decisions("test-id-1")
+        assert len(decisions) == 1
+        assert decisions[0].title == "Use JWT"
+        assert decisions[0].alternatives == ["sessions", "oauth"]
+
+    def test_save_with_artifacts(self, store):
+        self._setup_task(store)
+        cp = _make_checkpoint()
+        a = _make_artifact()
+        store.save_checkpoint(cp, [], [a], [])
+        artifacts = store.get_artifacts("test-id-1")
+        assert len(artifacts) == 1
+        assert artifacts[0].name == "test-spec"
+        assert artifacts[0].version == 1
+
+    def test_save_with_verifications(self, store):
+        self._setup_task(store)
+        cp = _make_checkpoint()
+        v = _make_verification()
+        store.save_checkpoint(cp, [], [], [v])
+        verifs = store.get_verifications("test-id-1")
+        assert len(verifs) == 1
+        assert verifs[0].result == "pass"
+
+    def test_artifact_dedup_same_checksum_skips(self, store):
+        self._setup_task(store)
+        content = "# Same content"
+        a1 = _make_artifact(content=content, version=1)
+        cp1 = _make_checkpoint(checkpoint_number=1)
+        store.save_checkpoint(cp1, [], [a1], [])
+
+        a2 = _make_artifact(content=content, version=2)
+        cp2 = _make_checkpoint(checkpoint_number=2)
+        store.save_checkpoint(cp2, [], [a2], [])
+
+        artifacts = store.get_artifacts("test-id-1")
+        assert len(artifacts) == 1  # Deduped: only v1 stored
+
+    def test_artifact_dedup_different_checksum_inserts(self, store):
+        self._setup_task(store)
+        a1 = _make_artifact(content="Version 1", version=1)
+        cp1 = _make_checkpoint(checkpoint_number=1)
+        store.save_checkpoint(cp1, [], [a1], [])
+
+        a2 = _make_artifact(content="Version 2", version=2)
+        cp2 = _make_checkpoint(checkpoint_number=2)
+        store.save_checkpoint(cp2, [], [a2], [])
+
+        artifacts = store.get_artifacts("test-id-1")
+        assert len(artifacts) == 2
+
+    def test_multiple_checkpoints_increment(self, store):
+        self._setup_task(store)
+        store.save_checkpoint(_make_checkpoint(checkpoint_number=1), [], [], [])
+        store.save_checkpoint(
+            _make_checkpoint(checkpoint_number=2, milestone="second"), [], [], []
+        )
+        task = store.get_task_by_id("test-id-1")
+        assert task.checkpoint_count == 2
+        assert task.last_milestone == "second"
+
+    def test_atomic_rollback_on_failure(self, store):
+        self._setup_task(store)
+        cp = _make_checkpoint()
+        a1 = _make_artifact(content="original", version=1)
+        store.save_checkpoint(cp, [], [a1], [])
+
+        # Now try a checkpoint with a duplicate unique constraint violation
+        cp_dup = _make_checkpoint(checkpoint_number=1)
+        with pytest.raises(Exception):
+            store.save_checkpoint(cp_dup, [], [], [])
+
+        # Original data should be intact
+        task = store.get_task_by_id("test-id-1")
+        assert task.checkpoint_count == 1
