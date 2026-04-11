@@ -141,3 +141,59 @@ class Store:
 
     def close(self) -> None:
         self._conn.close()
+
+    # --- Spaces ---
+
+    def create_space(self, name: str, description: str) -> None:
+        """Create a new space. Raises on duplicate."""
+        now = _now_iso()
+        self._conn.execute(
+            "INSERT INTO spaces (name, description, created) VALUES (?, ?, ?)",
+            (name, description, now),
+        )
+        self._conn.commit()
+
+    def get_space(self, name: str) -> Space | None:
+        """Get a space by name, or None if not found."""
+        row = self._conn.execute(
+            "SELECT name, description, created FROM spaces WHERE name = ?",
+            (name,),
+        ).fetchone()
+        if row is None:
+            return None
+        return Space(
+            name=row["name"],
+            description=row["description"],
+            created=datetime.fromisoformat(row["created"]),
+        )
+
+    def list_spaces(self) -> list[Space]:
+        """List all spaces ordered by name."""
+        rows = self._conn.execute(
+            "SELECT name, description, created FROM spaces ORDER BY name"
+        ).fetchall()
+        return [
+            Space(
+                name=r["name"],
+                description=r["description"],
+                created=datetime.fromisoformat(r["created"]),
+            )
+            for r in rows
+        ]
+
+    def remove_space(self, name: str) -> None:
+        """Remove a space. Raises SpaceNotEmptyError if tasks exist."""
+        count = self._conn.execute(
+            "SELECT COUNT(*) FROM tasks WHERE space = ?", (name,)
+        ).fetchone()[0]
+        if count > 0:
+            raise SpaceNotEmptyError(
+                f"Cannot remove space '{name}': {count} task(s) still exist"
+            )
+        self._conn.execute("DELETE FROM spaces WHERE name = ?", (name,))
+        self._conn.commit()
+
+    def ensure_space(self, name: str) -> None:
+        """Create space if it doesn't exist."""
+        if self.get_space(name) is None:
+            self.create_space(name, "")
