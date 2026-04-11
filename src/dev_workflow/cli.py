@@ -46,23 +46,6 @@ def cleanup(ctx: click.Context, *args, **kwargs) -> None:
         store.close()
 
 
-def _handle_error(fn):
-    """Decorator for CLI commands to catch domain errors."""
-    @click.pass_context
-    def wrapper(ctx, *args, **kwargs):
-        try:
-            return ctx.invoke(fn, *args, **kwargs)
-        except DevWorkflowError as e:
-            click.echo(str(e), err=True)
-            raise SystemExit(1)
-        except Exception as e:
-            click.echo(f"Internal error: {e}", err=True)
-            raise SystemExit(2)
-    wrapper.__name__ = fn.__name__
-    wrapper.__doc__ = fn.__doc__
-    return wrapper
-
-
 # --- Space commands ---
 
 @cli.group()

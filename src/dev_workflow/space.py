@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import re
 
-from dev_workflow.errors import SpaceNotFoundError
+from dev_workflow.errors import DevWorkflowError, SpaceNotFoundError
 from dev_workflow.models import Space
 from dev_workflow.store import Store
 
@@ -14,7 +14,7 @@ _SPACE_NAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 
 def _validate_space_name(name: str) -> None:
     if not name or not _SPACE_NAME_PATTERN.match(name):
-        raise ValueError(
+        raise DevWorkflowError(
             f"Invalid space name '{name}': must be lowercase alphanumeric with hyphens, "
             "starting with a letter or digit"
         )
