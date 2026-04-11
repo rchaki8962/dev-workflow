@@ -1,226 +1,101 @@
-# Design: dev-workflow Checkpoint Architecture
+# Tech Spec: dev-workflow Checkpoint Architecture
 
 Status: Draft
 Date: 2026-04-11
+PRD: [dev-workflow PRD](2026-04-11-dev-workflow-prd.md)
 
-## Summary
+## 1. Overview
 
-Redesign dev-workflow from a stage-pipeline system (spec -> plan -> execution with formal gates) to a checkpoint-oriented continuity layer. The CLI becomes a deterministic checkpoint engine backed by SQLite. The plugin slash commands are replaced by two generic agent skills. The task folder becomes a generated view, not a store.
+This spec describes the implementation design for dev-workflow, a checkpoint-oriented task continuity system. It translates the PRD's requirements into module boundaries, interfaces, data flow, and testing strategy.
 
-The guiding principle: **trivial to invoke, rich when it runs.**
+The implementation is a clean rewrite. No code from prior iterations is reused.
 
-## Problem
+## 2. Architecture
 
-The current dev-workflow imposes a rigid stage pipeline (`/run-stage spec`, `/stage-approve spec`, `/run-stage plan`, ...) that creates ceremony proportional to every task, regardless of size or complexity. Users must remember the command sequence and invoke each step explicitly.
-
-The actual pain points are:
-
-1. **Session continuity** -- re-briefing a fresh agent with full context when resuming across sessions is the sharpest pain point. The user knows what they were doing but has to re-explain everything.
-2. **Artifact preservation** -- specs, plans, decisions, and other key documents must survive outside chat history as durable files.
-3. **Agent-agnostic handoff** -- a completely different coding agent must be able to read the task state cold and either review or continue the work.
-4. **Development record** -- months later, the user needs to understand how a task was developed: what decisions shaped it, what alternatives were rejected, what code changed, what verification was done.
-5. **Progress visibility** -- during long executions, seeing what's done, running, and remaining.
-
-The current design over-serves orchestration and under-serves continuity.
-
-## Product Boundary
-
-dev-workflow is:
-- A checkpoint-oriented task continuity engine
-- A deterministic CLI backed by SQLite
-- A generator of agent-consumable context bundles (markdown views + structured JSON)
-- A normalizer and preserver of artifacts produced by other tools
-
-dev-workflow is not:
-- A brainstorming, planning, or execution engine (use Superpowers, Taskmaster, etc.)
-- A rigid stage pipeline
-- A tool that requires every task to follow spec -> plan -> execution
-
-## Architecture
+Three-layer stack:
 
 ```
-Agent Skills (awareness + capture)
-    |
-    |---> Python CLI (deterministic checkpoint engine)
-    |       init, checkpoint, resume, status, list, regenerate
-    |
-    |---> SQLite store (source of truth)
-    |       tasks, checkpoints, decisions, artifacts, verifications
-    |
-    |---> Generated markdown views (task folder)
-            HANDOFF.md, context/, record/, artifacts/
+CLI Layer (cli.py)
+  Thin Click wrappers. Parse args, call domain, format output.
+  │
+Domain Layer (task.py, checkpoint.py, resume.py, space.py, views.py, config.py, slug.py)
+  Business logic. Validation, checkpoint merging, view generation.
+  │
+Storage Layer (store.py)
+  All SQLite access. Schema, queries, transactions. Only module that imports sqlite3.
 ```
 
-### Storage / Presentation Split
+Plus two standalone agent skill files (`skills/`) that are markdown, not code.
 
-- **SQLite** is the source of truth. One database at `~/.dev-workflow/store.db`. All structured data (tasks, checkpoints, decisions, artifacts including content, verifications) lives here.
-- **Task folder** is a generated view. Markdown files are produced by the CLI from SQLite data. They can be deleted and regenerated at any time.
-- **Artifact content** is stored in SQLite (specs, plans, and similar documents are typically small text documents). The task folder contains generated copies for human/agent reading.
+## 3. Project Structure
 
-This means:
-- Backup is one file.
-- Cross-task queries are trivial SQL.
-- Atomic writes -- no half-written checkpoint if a session dies.
-- The task folder is a cache, not a store.
-
-## CLI Commands
-
-Six commands plus space management (kept from current design).
-
-### `dev-workflow init <name>`
-
-Creates a new task.
-
-**Input:** Task name. Optional `--prompt` (inline text), `--prompt-file` (path), `--space`, `--slug`, `--workspace` (repeatable).
-
-**Behavior:**
-1. Generate slug from name (existing slug logic, kept as-is). On collision: append `-2`, `-3`, etc.
-2. Insert task record into SQLite.
-3. Store original prompt as the first artifact (type: `prompt`).
-4. Generate task folder with initial `HANDOFF.md`.
-5. Return JSON: `{ slug, task_id, task_folder, handoff_path }`.
-
-### `dev-workflow checkpoint <slug>`
-
-Persists a checkpoint. This is the core command.
-
-**Input:** JSON payload via stdin (see Checkpoint Payload below). Optional `--space`.
-
-**Behavior:**
-1. Validate payload structure.
-2. Insert checkpoint record into SQLite (`checkpoints` table).
-3. Merge decisions into `decisions` table (auto-numbered, linked to checkpoint).
-4. Upsert artifacts: store metadata and content into `artifacts` table.
-5. Insert verifications into `verifications` table.
-6. Update open questions: add new, mark resolved.
-7. Update task record: last milestone, last checkpoint timestamp, summary.
-8. Regenerate all markdown views in the task folder.
-9. Return JSON: `{ checkpoint_number, decisions_added, artifacts_added, handoff_path }`.
-
-### `dev-workflow resume <slug>`
-
-Returns the full context bundle for a cold start.
-
-**Input:** Slug. Optional `--format json|md` (default: json), `--space`.
-
-**Behavior:**
-- `--format json`: Query SQLite, return structured JSON with: task metadata, current state summary, decisions list (title + rationale, no full detail), artifact index (type + description + path), open questions, next steps, last N checkpoints (summary level), and paths to detail files.
-- `--format md`: Regenerate task folder if stale, return path to `HANDOFF.md`.
-
-The JSON format is designed for agent consumption. The md format is for human reading or agents that prefer markdown.
-
-### `dev-workflow status [slug]`
-
-Quick progress dashboard.
-
-**Input:** Optional slug. Optional `--space`, `--all-spaces`, `--format json|table`.
-
-**Behavior:**
-- No slug: list all tasks in active space with one-line status (slug, last milestone, last checkpoint date, summary).
-- With slug: current state detail -- milestone, checkpoint count, decisions count, artifacts count, open questions, next steps.
-
-### `dev-workflow list`
-
-List tasks.
-
-**Input:** Optional `--space`, `--all-spaces`, `--format json|table`, `--milestone <filter>`.
-
-**Behavior:** Query SQLite for tasks. Display: slug, title, last milestone, last checkpoint date, one-line summary. `--all-spaces` queries across all spaces.
-
-### `dev-workflow regenerate <slug>`
-
-Regenerate all markdown views from SQLite.
-
-**Input:** Slug. Optional `--space`.
-
-**Behavior:**
-1. Query all data for the task from SQLite.
-2. Delete existing task folder contents (except any untracked files, warn about those).
-3. Regenerate: `HANDOFF.md`, `context/current-state.md`, `context/decisions.md`, `context/open-questions.md`, `artifacts/*`, `record/development-record.md`, `record/checkpoints.md`.
-4. Return JSON: `{ task_folder, files_generated }`.
-
-Useful when: a view is corrupted, you want a clean regeneration after manual edits to SQLite, or after a schema migration.
-
-### Space Management (kept as-is)
-
-`space create`, `space list`, `space remove`, `space info`. Unchanged from current design.
-
-## Checkpoint Payload Schema
-
-The JSON payload sent to `dev-workflow checkpoint` via stdin:
-
-```json
-{
-  "milestone": "spec-finalized",
-  "summary": "Finalized auth spec after evaluating three approaches...",
-  "decisions": [
-    {
-      "title": "JWT over session tokens",
-      "rationale": "Stateless, better for horizontal scaling",
-      "alternatives": ["session tokens", "OAuth2 delegation"],
-      "context": "Discussed during brainstorming, user prioritized scaling"
-    }
-  ],
-  "artifacts": [
-    {
-      "type": "spec",
-      "name": "auth-middleware-spec",
-      "version": 1,
-      "description": "Auth middleware spec, approach B -- JWT-based",
-      "content": "# Auth Middleware Spec\n\n## Overview\n..."
-    }
-  ],
-  "verifications": [
-    {
-      "type": "test-run",
-      "result": "pass",
-      "detail": "42/42 unit tests passing",
-      "command": "pytest tests/ -v"
-    }
-  ],
-  "insights": [
-    "The existing middleware is more coupled to the session store than expected"
-  ],
-  "next_steps": ["Plan implementation", "Decide on refresh token strategy"],
-  "open_questions": ["Support refresh tokens?"],
-  "resolved_questions": ["Which auth approach? -> JWT (decision #1)"]
-}
+```
+dev-workflow/
+├── pyproject.toml
+├── skills/
+│   ├── task-awareness.md
+│   └── task-checkpoint.md
+├── src/dev_workflow/
+│   ├── __init__.py              # version, public API
+│   ├── cli.py                   # Click CLI entry point
+│   ├── config.py                # Config file + env var resolution
+│   ├── store.py                 # All SQLite access
+│   ├── task.py                  # Task lifecycle (init, close)
+│   ├── checkpoint.py            # Checkpoint creation, merging, dedup
+│   ├── resume.py                # Context bundle synthesis
+│   ├── space.py                 # Space CRUD + resolution
+│   ├── views.py                 # Markdown view generation
+│   ├── models.py                # Dataclasses for all domain objects
+│   ├── slug.py                  # Slug generation + collision handling
+│   └── errors.py                # Exception hierarchy
+└── tests/
+    ├── conftest.py              # Shared fixtures (temp DB, Click test runner)
+    ├── test_cli.py              # Integration tests through CLI
+    ├── test_store.py            # Store unit tests
+    ├── test_checkpoint.py       # Checkpoint logic unit tests
+    ├── test_views.py            # View generation tests
+    ├── test_slug.py             # Slug edge cases
+    └── test_config.py           # Config resolution tests
 ```
 
-All fields except `milestone` and `summary` are optional. A minimal checkpoint is just:
+## 4. Storage Layer (`store.py`)
 
-```json
-{
-  "milestone": "session-end",
-  "summary": "Explored three auth approaches, leaning toward JWT"
-}
-```
+### 4.1 Responsibilities
 
-## SQLite Schema
+- Schema creation and migration on first connection
+- All CRUD operations as focused methods
+- Transaction management -- checkpoint persistence is one atomic transaction
+- Connection lifecycle (open/close, WAL mode)
 
-One database at `~/.dev-workflow/store.db`.
+### 4.2 Schema
+
+Matches PRD Section 13 with two additions: `checksum` on artifacts, `schema_version` table.
 
 ```sql
+CREATE TABLE schema_version (
+    version INTEGER NOT NULL
+);
+
 CREATE TABLE spaces (
     name TEXT PRIMARY KEY,
     description TEXT NOT NULL DEFAULT '',
-    created TEXT NOT NULL  -- ISO 8601
+    created TEXT NOT NULL
 );
 
 CREATE TABLE tasks (
-    task_id TEXT PRIMARY KEY,      -- "2026-04-11-auth-task"
+    task_id TEXT PRIMARY KEY,
     slug TEXT NOT NULL,
     title TEXT NOT NULL,
     space TEXT NOT NULL REFERENCES spaces(name),
     summary TEXT NOT NULL DEFAULT '',
     last_milestone TEXT NOT NULL DEFAULT '',
-    last_checkpoint_at TEXT,       -- ISO 8601
+    last_checkpoint_at TEXT,
     checkpoint_count INTEGER NOT NULL DEFAULT 0,
-    workspaces TEXT NOT NULL DEFAULT '[]',  -- JSON array of paths
-    task_folder TEXT NOT NULL,     -- generated view path
+    workspaces TEXT NOT NULL DEFAULT '[]',
+    task_folder TEXT NOT NULL,
     created TEXT NOT NULL,
     updated TEXT NOT NULL,
-    closed_at TEXT,                -- NULL until task is closed
+    closed_at TEXT,
     UNIQUE(slug, space)
 );
 
@@ -230,8 +105,9 @@ CREATE TABLE checkpoints (
     checkpoint_number INTEGER NOT NULL,
     milestone TEXT NOT NULL,
     summary TEXT NOT NULL,
-    insights TEXT NOT NULL DEFAULT '[]',     -- JSON array
-    next_steps TEXT NOT NULL DEFAULT '[]',   -- JSON array
+    user_directives TEXT NOT NULL DEFAULT '[]',
+    insights TEXT NOT NULL DEFAULT '[]',
+    next_steps TEXT NOT NULL DEFAULT '[]',
     open_questions TEXT NOT NULL DEFAULT '[]',
     resolved_questions TEXT NOT NULL DEFAULT '[]',
     created TEXT NOT NULL,
@@ -242,10 +118,10 @@ CREATE TABLE decisions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     task_id TEXT NOT NULL REFERENCES tasks(task_id),
     checkpoint_id INTEGER NOT NULL REFERENCES checkpoints(id),
-    decision_number INTEGER NOT NULL,  -- per-task auto-increment
+    decision_number INTEGER NOT NULL,
     title TEXT NOT NULL,
     rationale TEXT NOT NULL DEFAULT '',
-    alternatives TEXT NOT NULL DEFAULT '[]',  -- JSON array
+    alternatives TEXT NOT NULL DEFAULT '[]',
     context TEXT NOT NULL DEFAULT '',
     created TEXT NOT NULL,
     UNIQUE(task_id, decision_number)
@@ -255,11 +131,12 @@ CREATE TABLE artifacts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     task_id TEXT NOT NULL REFERENCES tasks(task_id),
     checkpoint_id INTEGER NOT NULL REFERENCES checkpoints(id),
-    type TEXT NOT NULL,            -- "spec", "plan", "prompt", "summary", etc.
+    type TEXT NOT NULL,
     name TEXT NOT NULL,
     version INTEGER NOT NULL,
     description TEXT NOT NULL DEFAULT '',
     content TEXT NOT NULL,
+    checksum TEXT NOT NULL,
     created TEXT NOT NULL,
     UNIQUE(task_id, name, version)
 );
@@ -268,238 +145,544 @@ CREATE TABLE verifications (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     task_id TEXT NOT NULL REFERENCES tasks(task_id),
     checkpoint_id INTEGER NOT NULL REFERENCES checkpoints(id),
-    type TEXT NOT NULL,            -- "test-run", "code-review", "manual-check"
-    result TEXT NOT NULL,          -- "pass", "fail", "partial"
+    type TEXT NOT NULL,
+    result TEXT NOT NULL,
     detail TEXT NOT NULL DEFAULT '',
     command TEXT NOT NULL DEFAULT '',
     created TEXT NOT NULL
 );
 ```
 
-## Generated Task Folder Structure
+### 4.3 Interface
+
+```python
+class Store:
+    def __init__(self, db_path: Path):
+        """Open or create the database. Auto-creates schema if needed."""
+
+    # Spaces
+    def create_space(self, name: str, description: str) -> None
+    def get_space(self, name: str) -> Space | None
+    def list_spaces(self) -> list[Space]
+    def remove_space(self, name: str) -> None  # fails if tasks exist
+    def ensure_space(self, name: str) -> None  # create if not exists
+
+    # Tasks
+    def create_task(self, task: Task) -> None
+    def get_task(self, slug: str, space: str) -> Task | None
+    def get_task_by_id(self, task_id: str) -> Task | None
+    def list_tasks(self, space: str | None = None) -> list[Task]
+    def update_task(self, task_id: str, **fields) -> None
+    def slug_exists(self, slug: str, space: str) -> bool
+
+    # Checkpoints (atomic multi-table write)
+    def save_checkpoint(self, checkpoint: Checkpoint,
+                        decisions: list[Decision],
+                        artifacts: list[Artifact],
+                        verifications: list[Verification]) -> int:
+        """Atomic transaction: insert checkpoint, merge decisions,
+        upsert artifacts (skip if checksum matches), record verifications,
+        update task record. Returns checkpoint number."""
+
+    # Reads
+    def get_checkpoints(self, task_id: str) -> list[Checkpoint]
+    def get_decisions(self, task_id: str) -> list[Decision]
+    def get_artifacts(self, task_id: str) -> list[Artifact]
+    def get_artifact_latest(self, task_id: str, name: str) -> Artifact | None
+    def get_verifications(self, task_id: str) -> list[Verification]
+    def get_next_decision_number(self, task_id: str) -> int
+    def get_next_checkpoint_number(self, task_id: str) -> int
+
+    def close(self) -> None
+```
+
+### 4.4 Key Behaviors
+
+- `save_checkpoint` wraps everything in a single transaction. If any part fails, nothing is written.
+- Artifact upsert computes SHA-256 of content, compares against latest version for that name. Skips insert if checksum matches, auto-increments version if different.
+- `remove_space` raises `SpaceNotEmptyError` if the space has tasks. No cascade deletes.
+- Schema uses `CREATE TABLE IF NOT EXISTS`. Future migrations keyed off `schema_version`.
+- WAL mode enabled on connection for reliability.
+
+## 5. Domain Models (`models.py`)
+
+Plain dataclasses. No ORM. These are the currency passed between layers.
+
+```python
+@dataclass
+class Space:
+    name: str
+    description: str
+    created: datetime
+
+@dataclass
+class Task:
+    task_id: str           # UUID
+    slug: str
+    title: str
+    space: str
+    summary: str
+    last_milestone: str
+    last_checkpoint_at: datetime | None
+    checkpoint_count: int
+    workspaces: list[str]  # paths to code repos this task touches
+    task_folder: Path
+    created: datetime
+    updated: datetime
+    closed_at: datetime | None
+
+@dataclass
+class Checkpoint:
+    id: int | None         # None before persistence
+    task_id: str
+    checkpoint_number: int
+    milestone: str
+    summary: str
+    user_directives: list[str]
+    insights: list[str]
+    next_steps: list[str]
+    open_questions: list[str]
+    resolved_questions: list[str]
+    created: datetime
+
+@dataclass
+class Decision:
+    id: int | None
+    task_id: str
+    checkpoint_id: int | None
+    decision_number: int
+    title: str
+    rationale: str
+    alternatives: list[str]
+    context: str
+    created: datetime
+
+@dataclass
+class Artifact:
+    id: int | None
+    task_id: str
+    checkpoint_id: int | None
+    type: str              # "spec", "plan", "design-doc", etc.
+    name: str
+    version: int
+    description: str
+    content: str
+    checksum: str          # SHA-256 of content
+    created: datetime
+
+@dataclass
+class Verification:
+    id: int | None
+    task_id: str
+    checkpoint_id: int | None
+    type: str              # "test-run", "code-review", "manual-check"
+    result: str            # "pass", "fail", "partial"
+    detail: str
+    command: str
+    created: datetime
+
+@dataclass
+class CheckpointPayload:
+    """Raw JSON payload from agent. Validated before decomposition
+    into domain objects by checkpoint.py."""
+    milestone: str
+    summary: str
+    decisions: list[dict] | None = None
+    artifacts: list[dict] | None = None
+    verifications: list[dict] | None = None
+    user_directives: list[str] | None = None
+    insights: list[str] | None = None
+    next_steps: list[str] | None = None
+    open_questions: list[str] | None = None
+    resolved_questions: list[str] | None = None
+```
+
+**Conventions:**
+
+- `id` fields are `None` before the store assigns them.
+- List fields (`insights`, `alternatives`, etc.) are Python lists. The store serializes them as JSON text for SQLite.
+- `checksum` is computed by checkpoint domain logic, not by the model.
+- All timestamps are UTC `datetime` objects. The store serializes as ISO-8601 strings.
+
+## 6. Domain Logic Modules
+
+### 6.1 `config.py` -- Configuration Resolution
+
+```python
+@dataclass
+class Config:
+    base_dir: Path         # default: ~/.dev-workflow
+    default_space: str     # default: "default"
+
+def load_config(config_path: Path | None = None) -> Config:
+    """Resolution order for each field:
+    - base_dir: DEV_WORKFLOW_BASE_DIR env var > config file > ~/.dev-workflow
+    - default_space: config file > "default"
+    (DEV_WORKFLOW_SPACE is handled by resolve_space, not here.)
+    """
+
+def resolve_space(cli_flag: str | None, config: Config) -> str:
+    """Active space resolution (PRD order):
+    1. --space CLI flag
+    2. DEV_WORKFLOW_SPACE env var
+    3. config.default_space
+    4. "default"
+    """
+```
+
+Config file is TOML at `<base_dir>/config.toml`. Optional, not required. Read via `tomllib` (stdlib in Python 3.11+).
+
+v1 schema:
+
+```toml
+default_space = "personal"
+```
+
+### 6.2 `slug.py` -- Slug Generation
+
+```python
+def generate_slug(title: str) -> str:
+    """Deterministic: lowercase, strip non-alphanumeric, hyphens for spaces,
+    truncate to 60 chars."""
+
+def resolve_slug(title: str, slug_exists_fn: Callable[[str], bool]) -> str:
+    """Generate slug, check for collision via callback, append -2, -3, etc."""
+```
+
+Collision check is a callback so slug logic doesn't depend on the store directly.
+
+### 6.3 `task.py` -- Task Lifecycle
+
+```python
+def init_task(store: Store, base_dir: Path, title: str, space: str,
+              prompt: str | None = None,
+              workspaces: list[str] | None = None) -> Task:
+    """Create a task:
+    1. Ensure space exists (auto-create "default" if needed)
+    2. Generate slug with collision handling
+    3. Generate task_id (UUID)
+    4. Compute task_folder path: <base_dir>/<space>/tasks/<date>-<slug>/
+    5. Insert task record
+    6. If prompt provided, create implicit checkpoint #0
+       (milestone="task-initialized", summary=title) and store
+       prompt as its artifact (type="prompt", name="original-prompt")
+    Returns the created Task.
+    """
+```
+
+The original prompt is stored as an artifact via an implicit initial checkpoint. This satisfies the `checkpoint_id NOT NULL` constraint on the artifacts table while keeping the prompt versioned/checksummed like everything else.
+
+### 6.4 `checkpoint.py` -- Checkpoint Creation
+
+```python
+def create_checkpoint(store: Store, task: Task,
+                      payload: CheckpointPayload) -> int:
+    """The core operation:
+    1. Validate payload (milestone and summary required)
+    2. Build Checkpoint from payload fields (including user_directives)
+    3. Build Decision list -- assign decision_numbers via store
+    4. Build Artifact list -- compute SHA-256 checksums
+    5. Build Verification list
+    6. Call store.save_checkpoint() (atomic transaction)
+    7. Return checkpoint number
+    """
+
+def validate_payload(payload: CheckpointPayload) -> None:
+    """Strict validation. Raises PayloadError with clear message
+    for: missing milestone/summary, empty artifact content,
+    unknown verification result values, etc."""
+```
+
+### 6.5 `resume.py` -- Context Bundle Synthesis
+
+```python
+def resume_task(store: Store, task: Task,
+                format: str = "json") -> str:
+    """Synthesize context bundle:
+    - json: structured dict matching PRD Section 10.5, serialized to JSON
+    - md: regenerate task folder via views.py, return path to HANDOFF.md
+    """
+```
+
+For `--format md`, calls `views.regenerate_task_folder()` then returns the HANDOFF.md path.
+
+### 6.6 `space.py` -- Space Management
+
+```python
+def create_space(store: Store, name: str, description: str) -> Space
+def list_spaces(store: Store) -> list[Space]
+def remove_space(store: Store, name: str) -> None  # fails if tasks exist
+def get_space_info(store: Store, name: str) -> dict  # space + task count
+```
+
+Thin wrappers over store methods with validation (name format, not-empty checks).
+
+## 7. View Generation (`views.py`)
+
+### 7.1 Generated Folder Structure
 
 ```
-~/.dev-workflow/<space>/tasks/<date>-<slug>/
-
-  HANDOFF.md                     # Index document. Summaries + links.
-                                 # Any agent reads ONLY this to start.
-                                 # ~1-2 pages. Regenerated every checkpoint.
-
+<task-folder>/
+  HANDOFF.md                     # Index. Summaries + links. Agent reads ONLY this.
   context/
-    original-prompt.md           # The initial request (from init --prompt)
-    current-state.md             # Latest checkpoint: milestone, summary,
-                                 #   next steps, open questions
-    decisions.md                 # All decisions: number, title, rationale
-                                 #   Links to artifacts/checkpoints for detail
+    original-prompt.md           # What the user originally asked for
+    current-state.md             # Latest checkpoint state
+    decisions.md                 # All decisions with rationale
     open-questions.md            # Unresolved questions
-
   artifacts/
-    spec-v1.md                   # Artifact content, versioned
-    spec-v2.md
-    plan-v1.md
-    <type>-<name>-v<N>.md
-
+    <type>-<name>-v<N>.md        # Latest version of each artifact
   record/
-    development-record.md        # Structured archival document:
-                                 #   intent, decisions, changes,
-                                 #   verifications, quality reviews, outcome
-                                 #   Sections with summaries + links to detail
-    checkpoints.md               # Chronological checkpoint log:
-                                 #   number, timestamp, milestone, one-line summary
+    development-record.md        # Structured archival document
+    checkpoints.md               # Chronological checkpoint log
 ```
 
-### Progressive Disclosure Principle
+### 7.2 Interface
 
-No file repeats another file's content. Each file owns one level of detail.
+```python
+def regenerate_task_folder(store: Store, task: Task) -> Path:
+    """Regenerate the entire task folder from SQLite.
+    1. Wipe existing folder (it's a cache)
+    2. Create directory structure
+    3. Generate each file
+    Returns path to task folder.
+    """
+```
 
-**HANDOFF.md** is the index layer (~500-2K tokens):
-- Task summary and current status
-- Key decisions (one line each) with links to `context/decisions.md#N`
-- Artifact index (type, version, one line) with links to `artifacts/<file>`
-- Open questions (list)
-- Next steps (list)
-- Pointer to `record/development-record.md` for full history
+Internal generators (one per file):
 
-**context/ files** are the operational layer:
-- `current-state.md`: latest checkpoint snapshot, next actions
-- `decisions.md`: all decisions with rationale, links to checkpoints
-- `open-questions.md`: unresolved items
+```python
+def _generate_handoff(task, checkpoints, decisions, artifacts, verifications) -> str
+def _generate_original_prompt(prompt_artifact: Artifact | None) -> str
+def _generate_current_state(task, latest_checkpoint) -> str
+def _generate_decisions(decisions: list[Decision]) -> str
+def _generate_open_questions(latest_checkpoint: Checkpoint | None) -> str
+def _generate_artifact_file(artifact: Artifact) -> str
+def _generate_development_record(task, checkpoints, decisions, verifications) -> str
+def _generate_checkpoints_log(checkpoints: list[Checkpoint]) -> str
+```
 
-**record/ files** are the archival layer:
-- `development-record.md`: full structured history, with summaries per section and links to raw checkpoints and artifacts
-- `checkpoints.md`: chronological log
+### 7.3 Key Behaviors
 
-**artifacts/** hold actual content. Referenced by other files, never duplicated.
+- `regenerate_task_folder` fetches all data from the store in one batch, then generates files. Full regeneration every time, no incremental updates.
+- **HANDOFF.md** contains one-line summaries with relative links to detail files. No content duplication across files. Includes user directives from the latest checkpoint so a cold-starting agent knows the user's explicit constraints and feedback.
+- **Artifact files** render only the latest version. Older versions live in SQLite; `checkpoints.md` records the history.
+- If a task has zero checkpoints (just initialized), the folder is minimal: HANDOFF.md with title/status, and `context/original-prompt.md` if a prompt was stored.
+- Lazy regeneration: views are only generated on `resume --format md` or explicit `regenerate`. Mutations (checkpoint, init) update SQLite only.
 
-An agent doing a quick resume loads HANDOFF.md (~500-2K tokens). An agent doing a deep review follows links (~5-15K). An agent auditing history goes into record/ and reads checkpoints. Each pays only for the depth it needs.
+## 8. CLI Layer (`cli.py`)
 
-## Skill Design
+### 8.1 Entry Point
 
-Two generic skills. Designed as markdown instruction files consumable by any coding agent (Claude Code, Cursor, OpenCode, etc.). Claude Code is the primary target for invocation patterns.
+```python
+@click.group()
+@click.option('--space', default=None, help='Override active space')
+@click.option('--base-dir', default=None, type=click.Path(), help='Override base directory')
+@click.pass_context
+def cli(ctx, space, base_dir):
+    """dev-workflow: checkpoint-oriented task continuity."""
+    config = load_config()
+    if base_dir:
+        config.base_dir = Path(base_dir)
+    ctx.ensure_object(dict)
+    ctx.obj['config'] = config
+    ctx.obj['space'] = resolve_space(space, config)
+    ctx.obj['store'] = Store(config.base_dir / 'store.db')
+```
 
-### Skill 1: task-awareness
+### 8.2 Commands
 
-**Purpose:** Loads task context into the session and primes the agent to recognize checkpoint-worthy moments.
+| Command | Signature | Output |
+|---------|-----------|--------|
+| `init` | `init <title> [--prompt TEXT] [--workspace PATH...]` | `{"slug", "task_id", "task_folder"}` |
+| `checkpoint` | `checkpoint <slug> [--payload FILE]` (or stdin) | `{"checkpoint_number", "message"}` |
+| `resume` | `resume <slug> [--format json\|md]` | JSON context bundle or HANDOFF.md path |
+| `status` | `status [slug]` | All tasks (no slug) or detailed task status |
+| `list` | `list [--all-spaces]` | JSON array of tasks with space labels |
+| `regenerate` | `regenerate <slug>` | `{"task_folder", "message"}` |
 
-**When invoked:** Session start, or when resuming a task.
+### 8.3 Space Subcommands
 
-**Behavior:**
-1. Calls `dev-workflow resume <slug> --format json` to load the latest state.
-2. Presents a brief status to the user: current milestone, what's next, open questions.
-3. Primes the agent with checkpoint recognition signals:
-   - A decision was made (approach chosen, technology picked, trade-off resolved)
-   - An artifact was produced or significantly revised (spec, plan, design doc)
-   - A meaningful implementation milestone was reached (module complete, tests passing)
-   - A direction change happened (pivot, scope change, requirement clarified)
+| Command | Signature | Output |
+|---------|-----------|--------|
+| `space create` | `space create <name> [--description TEXT]` | JSON confirmation |
+| `space list` | `space list` | JSON array |
+| `space remove` | `space remove <name>` | JSON confirmation |
+| `space info` | `space info <name>` | Space details + task count |
+
+### 8.4 Key Decisions
+
+- **All output is JSON** to stdout. Errors go to stderr as plain text.
+- **`checkpoint` reads payload** from stdin by default, `--payload` for file path. Click detects whether stdin has data.
+- **Exit codes:** 0 = success, 1 = user error (bad input, not found), 2 = internal error.
+- Store teardown via `@cli.result_callback()`.
+
+## 9. Error Handling (`errors.py`)
+
+```python
+class DevWorkflowError(Exception):
+    """Base. CLI catches this: message to stderr, exit 1."""
+
+class TaskNotFoundError(DevWorkflowError)
+class SpaceNotFoundError(DevWorkflowError)
+class SpaceNotEmptyError(DevWorkflowError)
+class PayloadError(DevWorkflowError)        # validation failures
+class SlugCollisionError(DevWorkflowError)  # exhausted collision attempts
+class StoreError(DevWorkflowError)          # SQLite errors wrapped
+```
+
+CLI error handling pattern:
+
+```python
+try:
+    # domain logic
+except DevWorkflowError as e:
+    click.echo(str(e), err=True)
+    raise SystemExit(1)
+except Exception as e:
+    click.echo(f"Internal error: {e}", err=True)
+    raise SystemExit(2)
+```
+
+Every `DevWorkflowError` carries a human-readable message. No stack traces for user errors (exit 1). Stack traces only for unexpected failures (exit 2).
+
+## 10. Agent Skills
+
+Two standalone markdown files in `skills/`. Detailed and prescriptive. These are the intelligence layer; the CLI is the correctness layer.
+
+### 10.1 `skills/task-awareness.md`
+
+Loaded at session start or resume. Primes the agent to recognize checkpoint-worthy moments.
+
+**Contents:**
+
+1. **Session start flow** -- run `dev-workflow status` to check for active tasks, then `dev-workflow resume <slug> --format json` if one exists. Present brief status to user.
+2. **Checkpoint-worthy signals:**
+   - A decision was made (approach chosen, trade-off resolved)
+   - An artifact was produced or significantly revised
+   - A meaningful implementation milestone was reached
+   - A direction change happened (pivot, scope change)
+   - The user gave significant new direction, constraints, or feedback
    - An open question was resolved or a new blocker surfaced
    - The user is about to end the session
-4. When the agent recognizes a checkpoint-worthy moment since the last checkpoint, it suggests: "We've made progress since the last checkpoint -- [reason]. Want me to save?"
+3. **Delta heuristic** -- compare against last checkpoint's summary, decisions, and artifacts. Only suggest when meaningful new information exists. Don't suggest if conversation has only been exploration with no decisions or outputs.
+4. **Suggestion phrasing** -- brief, not pushy. Accept "no" without re-asking.
+5. **What NOT to do** -- don't checkpoint automatically, don't nag, don't suggest after trivial exchanges.
 
-**Key principle:** The skill loads context and gets out of the way. It does not impose workflow. It makes the agent aware that checkpoints exist and when they'd be valuable.
+### 10.2 `skills/task-checkpoint.md`
 
-**Requires:** `dev-workflow` CLI installed and on PATH.
+Invoked when creating a checkpoint. Drafts the structured payload from conversation context.
 
-### Skill 2: task-checkpoint
+**Contents:**
 
-**Purpose:** Drafts a rich checkpoint payload and persists it via the CLI.
+1. **Payload schema** -- full JSON schema with all fields, types, required vs optional. Includes examples for each field.
+2. **Extraction instructions** (step by step):
+   - Summarize what happened since the last checkpoint
+   - Extract key user directives, constraints, and feedback from the conversation
+   - Extract decisions: title, rationale, alternatives considered, context
+   - Identify artifacts: capture full content of specs/plans/docs
+   - Note verifications: test runs, reviews, manual checks with results
+   - Collect insights: non-obvious observations worth preserving
+   - Determine next steps and open/resolved questions
+3. **Draft review flow** -- present draft to user in readable form (not raw JSON). Proceed only on explicit approval.
+4. **CLI invocation** -- exact command: `dev-workflow checkpoint <slug> --payload <file>` or pipe via stdin. Instructions for writing JSON to temp file for large payloads.
+5. **Minimal checkpoint example** -- just milestone + summary for quick session-end saves.
+6. **Rich checkpoint example** -- full payload with decisions, artifacts, verifications.
+7. **Error handling** -- if CLI returns error, show message and help fix payload.
 
-**When invoked:** User says "checkpoint this", or approves after task-awareness suggests one.
+### 10.3 Key Skill Design Decisions
 
-**Behavior:**
-1. Analyzes conversation since the last checkpoint.
-2. Drafts the checkpoint payload:
-   - Summarizes what happened (milestone name + narrative summary)
-   - Extracts decisions with rationale, alternatives, and context
-   - Identifies artifacts produced and captures their content
-   - Captures verification results (test runs, reviews)
-   - Notes insights and resolved/new open questions
-   - Proposes next steps
-3. Presents the draft to the user for review and editing.
-4. On approval, calls `dev-workflow checkpoint <slug> --stdin` with the JSON payload.
-5. Confirms: "Checkpoint #N saved: `<milestone>`. [N] decisions, [N] artifacts captured."
+- Skills reference CLI commands by exact invocation, not abstractly.
+- Skills include full examples so the agent doesn't infer payload structure.
+- The checkpoint skill explicitly instructs capturing artifact **content**, not just names.
+- Neither skill auto-executes anything. Both gate on user approval.
 
-**Key principle:** The heavy lifting is in the drafting. A good draft means the user just approves, maybe tweaks one line. The skill earns its value by distilling the conversation into structured, preservable context.
+## 11. Testing Strategy
 
-**Requires:** `dev-workflow` CLI installed and on PATH. task-awareness should have been invoked earlier in the session (to establish the active task slug and last checkpoint baseline).
+### 11.1 Framework
 
-### How They Work Together
+pytest, using Click's `CliRunner` for integration tests.
 
-```
-New session
-  |-- User: "continue working on auth-task"
-  |-- task-awareness invoked
-  |     |-- Calls: dev-workflow resume auth-task --format json
-  |     |-- Presents brief status to user
-  |     |-- Primes agent with checkpoint signals
-  |
-  |-- [freeform work: brainstorming, coding, reviewing, whatever]
-  |
-  |-- Agent notices: "we just finalized the JWT decision"
-  |     |-- Agent: "checkpoint-worthy -- want to save?"
-  |     |-- User: "yes"
-  |
-  |-- task-checkpoint invoked
-  |     |-- Drafts payload from conversation
-  |     |-- User reviews/approves
-  |     |-- Calls: dev-workflow checkpoint auth-task --stdin
-  |     |-- CLI persists to SQLite, regenerates views
-  |
-  |-- [freeform work continues...]
-```
+### 11.2 Shared Fixtures (`conftest.py`)
 
-### Agent-Agnostic Design
+```python
+@pytest.fixture
+def tmp_base_dir(tmp_path):
+    """Isolated base directory. No test touches real ~/.dev-workflow."""
+    return tmp_path / "dev-workflow"
 
-For non-Claude-Code agents:
-- Call `dev-workflow resume <slug>` directly to get context (JSON or HANDOFF.md).
-- Work normally.
-- Call `dev-workflow checkpoint <slug>` with a JSON payload to persist.
-- The skills are markdown files -- any agent framework with a skill/rule mechanism can load them.
+@pytest.fixture
+def store(tmp_base_dir):
+    """Fresh Store with auto-created schema."""
+    db_path = tmp_base_dir / "store.db"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    s = Store(db_path)
+    yield s
+    s.close()
 
-## Resume Flow
-
-The critical path for session continuity.
-
-`dev-workflow resume <slug> --format json` returns:
-
-```json
-{
-  "slug": "auth-task",
-  "title": "Auth Middleware Rewrite",
-  "space": "default",
-  "last_milestone": "spec-finalized",
-  "last_checkpoint_at": "2026-04-11T14:30:00Z",
-  "checkpoint_count": 3,
-  "summary": "JWT-based auth spec finalized after evaluating three approaches...",
-  "next_steps": ["Plan implementation", "Decide on refresh token strategy"],
-  "open_questions": ["Support refresh tokens?"],
-  "decisions": [
-    { "number": 1, "title": "JWT over session tokens", "rationale": "Stateless, scales horizontally" },
-    { "number": 2, "title": "Postgres for session audit log", "rationale": "..." }
-  ],
-  "artifacts": [
-    { "type": "spec", "name": "auth-middleware-spec", "version": 2, "description": "..." }
-  ],
-  "recent_verifications": [
-    { "type": "test-run", "result": "pass", "detail": "42/42 tests" }
-  ],
-  "handoff_path": "~/.dev-workflow/default/tasks/2026-04-11-auth-task/HANDOFF.md",
-  "detail_paths": {
-    "decisions": ".../context/decisions.md",
-    "record": ".../record/development-record.md",
-    "checkpoints": ".../record/checkpoints.md"
-  }
-}
+@pytest.fixture
+def cli_runner(tmp_base_dir):
+    """Click CliRunner with --base-dir pointed at temp directory."""
+    runner = CliRunner()
+    def invoke(*args):
+        return runner.invoke(cli, ['--base-dir', str(tmp_base_dir)] + list(args))
+    return invoke
 ```
 
-This is the summary layer. An agent reads this (~500 tokens), gets the full picture, and follows `detail_paths` only if it needs more depth.
+### 11.3 Test Distribution
 
-## Migration Path
+| File | What it tests | Style |
+|------|---------------|-------|
+| `test_cli.py` | Full command flows, space commands, error cases, cross-space listing | Integration |
+| `test_store.py` | Schema creation, CRUD, atomic checkpoint save, constraints, artifact checksum dedup | Unit |
+| `test_checkpoint.py` | Payload validation, decision numbering, checksum logic, version auto-increment | Unit |
+| `test_views.py` | Generated markdown structure, progressive disclosure, empty task folder | Unit |
+| `test_slug.py` | Unicode, long titles, collision suffixes, special characters | Unit |
+| `test_config.py` | Resolution order (env > config > defaults), missing config, malformed TOML | Unit |
 
-### What Gets Thrown Away
-- Entire `claude_plugin/` directory (8 slash commands, config, manifests)
-- `StageManager` (`stage.py`) -- rigid pipeline
-- Review system (review setup, review approve)
-- Stage setup / teardown orchestration
-- Models: `Review`, `ReviewVerdict`, `Stage` as enforced pipeline
-- `FileTaskStore` (replaced by SQLite)
-- `StateManager` (replaced by SQLite)
-- `templates.py` (replaced by markdown generation from SQLite)
-- Most of the 423 existing tests
+### 11.4 Key Integration Test Scenarios (`test_cli.py`)
 
-### What Gets Kept / Adapted
-- `Config` + space resolution logic (kept, adapted for SQLite path)
-- `SpaceManager` (adapted to use SQLite instead of `spaces.json`)
-- Slug generation (`slug.py`) -- works as-is
-- `Space` and `Task` dataclasses (simplified, adapted)
-- `progress.py` concepts (adapted for checkpoint-based progress)
-- `exceptions.py` -- error types still useful
-- `cli.py` -- Click CLI structure (rewritten with new commands)
+1. **Full lifecycle** -- init, checkpoint, resume (JSON and markdown), status, list
+2. **Multiple checkpoints** -- checkpoint count increments, decisions auto-number, artifact versions increment
+3. **Artifact dedup** -- same content twice, verify only one version stored
+4. **Multi-space** -- two spaces, tasks in each, `list --all-spaces` shows both
+5. **Error paths** -- nonexistent slug, remove space with tasks, malformed JSON, missing fields
+6. **Regenerate** -- checkpoint, delete task folder, regenerate, verify folder rebuilt
 
-### New Components
-- SQLite store module (replaces `FileTaskStore` + `StateManager`)
-- Markdown view generator (generates task folder from SQLite data)
-- Checkpoint processor (parses payload, distributes across tables)
-- Two skill files (markdown, no Python code)
+### 11.5 What's Not Tested
 
-## What's Deferred
+- Skills (markdown, not code)
+- Exact markdown wording (test structure and presence, not formatting)
 
-- Claude Code hooks (SessionStart auto-resume, PostToolUse auto-checkpoint suggestions)
-- Task close / archive command (the `closed_at` column exists in the schema for future use)
-- Task import (ingest artifacts from an existing directory)
-- Structured mode (typed checkpoints like spec-approval, plan-approval)
-- Dashboard UI
-- Skill auto-detection of checkpoint moments (v1 is agent-suggested, user-approved)
-- Binary artifact support (v1 stores text content only; binary files like screenshots would need a blob column or file-reference approach)
+## 12. Packaging
 
-## Acceptance Criteria
+```toml
+[project]
+name = "dev-workflow"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "click>=8.0",
+]
 
-1. A fresh session can resume a task by calling `dev-workflow resume <slug>` -- no prior chat history needed.
-2. A different coding agent can read `HANDOFF.md` cold and understand the task state, key decisions, and what's next.
-3. `HANDOFF.md` uses progressive disclosure: summaries with links, not content duplication.
-4. All structured data lives in SQLite. All task folder files are regenerable via `dev-workflow regenerate <slug>`.
-5. A checkpoint captures: milestone, summary, decisions, artifacts (with content), verifications, insights, next steps, and open questions.
-6. The development record (`record/development-record.md`) provides a structured archival view: intent, decisions with rationale, verification results, quality outcomes.
-7. Small tasks work with just `init` + one or two checkpoints. No mandatory stages.
-8. The skills work as generic markdown instruction files consumable by any coding agent.
-9. Space management continues to work (create, list, remove, isolation).
-10. `dev-workflow list` and `dev-workflow status` provide cross-task visibility.
+[project.scripts]
+dev-workflow = "dev_workflow.cli:cli"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+]
+```
+
+**Key decisions:**
+
+- **Single runtime dependency: Click.** SQLite is stdlib. TOML parsing via `tomllib` (stdlib 3.11+).
+- **Python 3.11+** required for `tomllib` and `datetime.fromisoformat` improvements.
+- **Hatchling** build backend.
+- Entry point via `[project.scripts]` -- `dev-workflow` available after `pip install -e .`.

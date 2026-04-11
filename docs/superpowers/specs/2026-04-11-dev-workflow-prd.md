@@ -284,6 +284,7 @@ What the agent sends to the CLI when checkpointing:
       "command": "pytest tests/ -v"
     }
   ],
+  "user_directives": ["Prioritize horizontal scaling", "Must work with existing Postgres infra"],
   "insights": ["Existing middleware is more coupled to session store than expected"],
   "next_steps": ["Plan implementation"],
   "open_questions": ["Support refresh tokens?"],
@@ -315,6 +316,7 @@ All fields except `milestone` and `summary` are optional. A minimal checkpoint:
   "summary": "JWT-based auth spec finalized after evaluating three approaches...",
   "next_steps": ["Plan implementation", "Decide on refresh token strategy"],
   "open_questions": ["Support refresh tokens?"],
+  "user_directives": ["Prioritize horizontal scaling", "Must work with existing Postgres infra"],
   "decisions": [
     { "number": 1, "title": "JWT over session tokens", "rationale": "Stateless, scales horizontally" },
     { "number": 2, "title": "Postgres for session audit log", "rationale": "Existing infra, ACID guarantees" }
@@ -348,6 +350,7 @@ Invoked at session start or resume. Loads the last checkpoint via `dev-workflow 
 - An artifact was produced or significantly revised
 - A meaningful implementation milestone was reached
 - A direction change happened (pivot, scope change)
+- The user gave significant new direction, constraints, or feedback
 - An open question was resolved or a new blocker surfaced
 - The user is about to end the session
 
@@ -358,10 +361,11 @@ When the agent recognizes a checkpoint-worthy moment, it suggests saving. The sk
 Invoked when actually checkpointing. Drafts the structured payload by analyzing the conversation since the last checkpoint:
 
 1. Summarizes what happened
-2. Extracts decisions with rationale and alternatives
-3. Identifies artifacts and captures their content
-4. Notes verifications, insights, resolved/new questions
-5. Proposes next steps
+2. Extracts key user directives, constraints, and feedback from the conversation
+3. Extracts decisions with rationale and alternatives
+4. Identifies artifacts and captures their content
+5. Notes verifications, insights, resolved/new questions
+6. Proposes next steps
 6. Presents draft to user for review/edit
 7. On approval, calls `dev-workflow checkpoint <slug>` with the payload
 
@@ -381,7 +385,7 @@ The system must accept a structured checkpoint payload and atomically persist it
 
 ### FR-3 Checkpoint History
 
-The system must preserve all checkpoints chronologically. Each checkpoint records: milestone name, timestamp, summary, decisions made, artifacts produced, verifications performed, insights, next steps, and question changes.
+The system must preserve all checkpoints chronologically. Each checkpoint records: milestone name, timestamp, summary, user directives, decisions made, artifacts produced, verifications performed, insights, next steps, and question changes.
 
 ### FR-4 Resume / Cold-Start
 
@@ -480,7 +484,7 @@ Agent notices checkpoint-worthy moment
 
 | Action | Target | How |
 |--------|--------|-----|
-| Save raw payload | `checkpoints` table | Insert record |
+| Save raw payload | `checkpoints` table | Insert record (includes user_directives) |
 | Merge decisions | `decisions` table | Append, auto-number per task |
 | Upsert artifacts | `artifacts` table | Insert or update by name+version, store content |
 | Record verifications | `verifications` table | Insert linked to checkpoint |
@@ -520,6 +524,7 @@ CREATE TABLE checkpoints (
     checkpoint_number INTEGER NOT NULL,
     milestone TEXT NOT NULL,
     summary TEXT NOT NULL,
+    user_directives TEXT NOT NULL DEFAULT '[]',
     insights TEXT NOT NULL DEFAULT '[]',
     next_steps TEXT NOT NULL DEFAULT '[]',
     open_questions TEXT NOT NULL DEFAULT '[]',
