@@ -24,6 +24,8 @@ venv/
 .DS_Store
 Thumbs.db
 
+.trash
+
 # Environment
 .env
 
@@ -34,3 +36,6 @@ htmlcov/
 
 # dev-workflow data directory (if local testing creates one)
 .dev-workflow/
+
+# Worktrees
+.worktrees/
